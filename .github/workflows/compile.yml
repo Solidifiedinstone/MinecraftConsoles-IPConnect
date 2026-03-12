@@ -1,0 +1,32 @@
+name: Compile MinecraftConsoles
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install CMake
+        uses: lukka/get-cmake@latest
+
+      - name: Configure Build
+        run: |
+          mkdir build
+          cd build
+          cmake -G "Visual Studio 17 2022" -A x64 ..
+
+      - name: Compile
+        run: |
+          cd build
+          cmake --build . --config Release
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: Minecraft.Client.exe
+          path: build/Release/Minecraft.Client.exe
