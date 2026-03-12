@@ -3,6 +3,7 @@
 #include "Button.h"
 #include "EditBox.h"
 #include "Options.h"
+#include "ConnectScreen.h"
 #include "..\Minecraft.World\net.minecraft.locale.h"
 
 JoinMultiplayerScreen::JoinMultiplayerScreen(Screen *lastScreen)
