@@ -153,6 +153,8 @@ public:
 	static int DeleteSaveDataReturned(LPVOID lpParam,bool bRes);
 	static int RenameSaveDataReturned(LPVOID lpParam,bool bRes);
 	static int KeyboardCompleteWorldNameCallback(LPVOID lpParam,bool bRes);
+	static const int JOIN_BY_IP_BUTTON_INDEX = 1;
+	static int JoinByIPKeyboardCallback(LPVOID lpParam, bool bRes);
 #ifdef __PSVITA__
 	static int MustSignInTexturePack(void *pParam,int iPad,C4JStorage::EMessageResult result);
 	static int MustSignInReturnedTexturePack(void *pParam,bool bContinue, int iPad);

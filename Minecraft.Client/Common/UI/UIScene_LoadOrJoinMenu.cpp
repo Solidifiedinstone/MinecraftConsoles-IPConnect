@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "UI.h"
 #include "UIScene_LoadOrJoinMenu.h"
+#include "../../ConnectScreen.h"
 
 #include "..\..\..\Minecraft.World\StringHelpers.h"
 #include "..\..\..\Minecraft.World\net.minecraft.world.item.h"
@@ -1076,6 +1077,9 @@ void UIScene_LoadOrJoinMenu::AddDefaultButtons()
 	m_buttonListSaves.addItem(app.GetString(IDS_CREATE_NEW_WORLD));
     m_iDefaultButtonsC++;
 
+	m_buttonListSaves.addItem(L"Join by IP");
+	m_iDefaultButtonsC++;
+
     int i = 0;
 
     for ( LevelGenerationOptions *levelGen : *app.getLevelGenerators() )
@@ -1457,6 +1461,44 @@ int UIScene_LoadOrJoinMenu::KeyboardCompleteWorldNameCallback(LPVOID lpParam,boo
 
     return 0;
 }
+
+int UIScene_LoadOrJoinMenu::JoinByIPKeyboardCallback(LPVOID lpParam, bool bRes)
+{
+    UIScene_LoadOrJoinMenu *pClass = (UIScene_LoadOrJoinMenu *)lpParam;
+    pClass->m_bIgnoreInput = false;
+    if (bRes)
+    {
+        uint16_t ui16Text[128];
+        ZeroMemory(ui16Text, 128 * sizeof(uint16_t));
+#ifdef _WINDOWS64
+        Win64_GetKeyboardText(ui16Text, 128);
+#else
+        InputManager.GetText(ui16Text);
+#endif
+        wstring ip = wstring((wchar_t*)ui16Text);
+        ip = trimString(ip);
+        if (!ip.empty())
+        {
+            Minecraft* mc = Minecraft::GetInstance();
+            mc->options->lastMpIp = replaceAll(ip, L":", L"_");
+            mc->options->save();
+
+            wstring host = ip;
+            int port = 25565;
+            size_t colonPos = ip.rfind(L':');
+            if (colonPos != wstring::npos)
+            {
+                host = ip.substr(0, colonPos);
+                wstring portStr = ip.substr(colonPos + 1);
+                port = _wtoi(portStr.c_str());
+                if (port <= 0) port = 25565;
+            }
+            mc->setScreen(new ConnectScreen(mc, host, port));
+        }
+    }
+    return 0;
+}
+
 void UIScene_LoadOrJoinMenu::handleInitFocus(F64 controlId, F64 childId)
 {
     app.DebugPrintf(app.USER_SR, "UIScene_LoadOrJoinMenu::handleInitFocus - %d , %d\n", (int)controlId, (int)childId);
@@ -1498,7 +1540,7 @@ void UIScene_LoadOrJoinMenu::handlePress(F64 controlId, F64 childId)
         {
             m_bIgnoreInput=true;
 
-            int lGenID = (int)childId - 1;
+            int lGenID = (int)childId - 2;
 
             //CD - Added for audio
             ui.PlayUISFX(eSFX_Press);
@@ -1514,6 +1556,18 @@ void UIScene_LoadOrJoinMenu::handlePress(F64 controlId, F64 childId)
                 CreateWorldMenuInitData *params = new CreateWorldMenuInitData();
                 params->iPad = m_iPad;
                 ui.NavigateToScene(m_iPad,eUIScene_CreateWorldMenu,(void *)params);
+            }
+            else if((int)childId == JOIN_BY_IP_BUTTON_INDEX)
+            {
+                wstring lastIp = replaceAll(Minecraft::GetInstance()->options->lastMpIp, L"_", L":");
+                UIKeyboardInitData kbData;
+                kbData.title       = L"Enter Server IP";
+                kbData.defaultText = lastIp.c_str();
+                kbData.maxChars    = 128;
+                kbData.callback    = &UIScene_LoadOrJoinMenu::JoinByIPKeyboardCallback;
+                kbData.lpParam     = this;
+                kbData.pcMode      = g_KBMInput.IsKBMActive();
+                ui.NavigateToScene(m_iPad, eUIScene_Keyboard, &kbData);
             }
             else if (lGenID < m_generators.size())
             {
