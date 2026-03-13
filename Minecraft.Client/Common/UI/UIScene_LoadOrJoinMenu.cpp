@@ -1481,7 +1481,6 @@ int UIScene_LoadOrJoinMenu::JoinByIPKeyboardCallback(LPVOID lpParam, bool bRes)
             wIp[k] = (wchar_t)ui16Text[k];
 
         wstring ip = wstring(wIp);
-        ip = trimString(ip);
         if (!ip.empty())
         {
             Minecraft* mc = Minecraft::GetInstance();
