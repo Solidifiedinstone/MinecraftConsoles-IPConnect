@@ -252,6 +252,7 @@ set(MINECRAFT_CLIENT_SOURCES
   "Common/zlib/zutil.c"
   "CompassTexture.cpp"
   "ConfirmScreen.cpp"
+  "ConnectScreen.cpp"
   "ConsoleInput.cpp"
   "ControlsScreen.cpp"
   "CowModel.cpp"
