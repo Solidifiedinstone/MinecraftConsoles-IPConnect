@@ -23,7 +23,7 @@ jobs:
       - name: Compile
         run: |
           cd build
-          cmake --build . --config Release
+          cmake --build . --config Release --verbose
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
