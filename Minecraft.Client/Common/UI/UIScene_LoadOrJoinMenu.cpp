@@ -1475,7 +1475,12 @@ int UIScene_LoadOrJoinMenu::JoinByIPKeyboardCallback(LPVOID lpParam, bool bRes)
 #else
         InputManager.GetText(ui16Text);
 #endif
-        wstring ip = wstring((wchar_t*)ui16Text);
+
+        wchar_t wIp[128] = {};
+        for (int k = 0; k < 127 && ui16Text[k]; k++)
+            wIp[k] = (wchar_t)ui16Text[k];
+
+        wstring ip = wstring(wIp);
         ip = trimString(ip);
         if (!ip.empty())
         {
