@@ -22,11 +22,20 @@ jobs:
           cmake -G "Visual Studio 17 2022" -A x64 ..
 
       - name: Compile
+        shell: cmd
         run: |
           cd build
-          cmake --build . --config Release -- /m /p:CL_MPCount=4 /clp:ForceConsoleColor /v:normal
-        env:
-          CL: /diagnostics:classic
+          cmake --build . --config Release 2> build_errors.txt
+          echo EXIT CODE: %errorlevel%
+          type build_errors.txt
+
+      - name: Show errors if failed
+        if: failure()
+        shell: cmd
+        run: |
+          if exist build\build_errors.txt type build\build_errors.txt
+          echo ---
+          dir build\Release\ 2>nul || echo No Release directory
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
