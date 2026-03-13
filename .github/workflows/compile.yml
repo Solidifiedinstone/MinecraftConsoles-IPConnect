@@ -8,7 +8,7 @@ on:
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v3
 
@@ -24,7 +24,9 @@ jobs:
       - name: Compile
         run: |
           cd build
-          cmake --build . --config Release -- /v:normal 2>&1
+          cmake --build . --config Release -- /m /p:CL_MPCount=4 /clp:ForceConsoleColor /v:normal
+        env:
+          CL: /diagnostics:classic
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
