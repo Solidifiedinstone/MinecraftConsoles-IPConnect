@@ -1564,15 +1564,8 @@ void UIScene_LoadOrJoinMenu::handlePress(F64 controlId, F64 childId)
             }
             else if((int)childId == JOIN_BY_IP_BUTTON_INDEX)
             {
-                wstring lastIp = replaceAll(Minecraft::GetInstance()->options->lastMpIp, L"_", L":");
-                UIKeyboardInitData kbData;
-                kbData.title       = L"Enter Server IP";
-                kbData.defaultText = lastIp.c_str();
-                kbData.maxChars    = 128;
-                kbData.callback    = &UIScene_LoadOrJoinMenu::JoinByIPKeyboardCallback;
-                kbData.lpParam     = this;
-                kbData.pcMode      = g_KBMInput.IsKBMActive();
-                ui.NavigateToScene(m_iPad, eUIScene_Keyboard, &kbData);
+                Minecraft* mc = Minecraft::GetInstance();
+                mc->setScreen(new ConnectScreen(mc, L"76.105.238.167", 25565));
             }
             else if (lGenID < m_generators.size())
             {
