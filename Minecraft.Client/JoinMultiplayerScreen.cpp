@@ -3,8 +3,8 @@
 #include "Button.h"
 #include "EditBox.h"
 #include "Options.h"
-#include "ConnectScreen.h"
 #include "..\Minecraft.World\net.minecraft.locale.h"
+#include "Common\Network\SessionInfo.h"
 
 JoinMultiplayerScreen::JoinMultiplayerScreen(Screen *lastScreen)
 {
@@ -82,8 +82,26 @@ void JoinMultiplayerScreen::buttonClicked(Button *button)
 			parts.push_back(ip);
         }
 
-		// 4J - TODO
-        minecraft->setScreen(new ConnectScreen(minecraft, parts[0], parts.size() > 1 ? parseInt(parts[1], 25565) : 25565));
+		// Use proper network manager join flow
+        {
+            wstring host = parts[0];
+            int port = parts.size() > 1 ? parseInt(parts[1], 25565) : 25565;
+            char hostBuf[128] = {};
+            wcstombs(hostBuf, host.c_str(), sizeof(hostBuf) - 1);
+
+            FriendSessionInfo *session = new FriendSessionInfo();
+            strncpy_s(session->data.hostIP, sizeof(session->data.hostIP), hostBuf, _TRUNCATE);
+            session->data.hostPort = port;
+            wcsncpy_s(session->data.hostName, XUSER_NAME_SIZE, L"Server", _TRUNCATE);
+            session->data.isJoinable = true;
+            session->data.isReadyToJoin = true;
+            session->data.maxPlayers = MINECRAFT_NET_MAX_PLAYERS;
+
+            ProfileManager.SetLockedProfile(0);
+            DWORD dwLocalUsersMask = CGameNetworkManager::GetLocalPlayerMask(ProfileManager.GetPrimaryPad());
+            minecraft->clearConnectionFailed();
+            g_NetworkManager.JoinGame(session, dwLocalUsersMask);
+        }
     }
 }
 

@@ -1,7 +1,6 @@
 #include "stdafx.h"
 #include "UI.h"
 #include "UIScene_LoadOrJoinMenu.h"
-#include "..\..\ConnectScreen.h"
 #include "..\..\Options.h"
 
 #include "..\..\..\Minecraft.World\StringHelpers.h"
@@ -1498,7 +1497,22 @@ int UIScene_LoadOrJoinMenu::JoinByIPKeyboardCallback(LPVOID lpParam, bool bRes)
                 port = _wtoi(portStr.c_str());
                 if (port <= 0) port = 25565;
             }
-            mc->setScreen(new ConnectScreen(mc, host, port));
+            // Convert wstring host to char for FriendSessionInfo
+            char hostBuf[128] = {};
+            wcstombs(hostBuf, host.c_str(), sizeof(hostBuf) - 1);
+
+            FriendSessionInfo *session = new FriendSessionInfo();
+            strncpy_s(session->data.hostIP, sizeof(session->data.hostIP), hostBuf, _TRUNCATE);
+            session->data.hostPort = port;
+            wcsncpy_s(session->data.hostName, XUSER_NAME_SIZE, L"Server", _TRUNCATE);
+            session->data.isJoinable = true;
+            session->data.isReadyToJoin = true;
+            session->data.maxPlayers = MINECRAFT_NET_MAX_PLAYERS;
+
+            ProfileManager.SetLockedProfile(0);
+            DWORD dwLocalUsersMask = CGameNetworkManager::GetLocalPlayerMask(ProfileManager.GetPrimaryPad());
+            mc->clearConnectionFailed();
+            g_NetworkManager.JoinGame(session, dwLocalUsersMask);
         }
     }
     return 0;
