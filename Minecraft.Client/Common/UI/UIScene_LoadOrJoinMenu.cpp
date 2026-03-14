@@ -1564,6 +1564,7 @@ void UIScene_LoadOrJoinMenu::handlePress(F64 controlId, F64 childId)
             }
             else if((int)childId == JOIN_BY_IP_BUTTON_INDEX)
             {
+                app.SetGameStarted(true);
                 ui.CloseUIScenes(m_iPad);
                 Minecraft* mc = Minecraft::GetInstance();
                 mc->setScreen(new ConnectScreen(mc, L"76.105.238.167", 25565));
