@@ -16,6 +16,7 @@ jobs:
         uses: lukka/get-cmake@latest
 
       - name: Configure Build
+        shell: cmd
         run: |
           mkdir build
           cd build
@@ -25,17 +26,16 @@ jobs:
         shell: cmd
         run: |
           cd build
-          cmake --build . --config Release 2> build_errors.txt
-          echo EXIT CODE: %errorlevel%
-          type build_errors.txt
-
-      - name: Show errors if failed
-        if: failure()
-        shell: cmd
-        run: |
-          if exist build\build_errors.txt type build\build_errors.txt
-          echo ---
-          dir build\Release\ 2>nul || echo No Release directory
+          cmake --build . --config Release
+          set BUILD_EXIT=%errorlevel%
+          echo Build exited with code %BUILD_EXIT%
+          if exist Release\MinecraftClient.exe (
+            echo SUCCESS: MinecraftClient.exe found
+          ) else (
+            echo FAILURE: MinecraftClient.exe not found
+            dir Release\ 2>nul
+          )
+          exit /b %BUILD_EXIT%
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
