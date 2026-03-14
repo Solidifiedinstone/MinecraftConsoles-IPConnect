@@ -10,6 +10,9 @@ on:
       - '*.md'
       - '.github/*.md'
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build Windows64
