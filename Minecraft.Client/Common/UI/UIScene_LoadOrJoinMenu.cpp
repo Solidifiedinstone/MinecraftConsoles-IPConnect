@@ -1578,27 +1578,8 @@ void UIScene_LoadOrJoinMenu::handlePress(F64 controlId, F64 childId)
             }
             else if((int)childId == JOIN_BY_IP_BUTTON_INDEX)
             {
-                app.SetTutorialMode(false);
-
-                FriendSessionInfo *session = new FriendSessionInfo();
-                strncpy_s(session->data.hostIP, sizeof(session->data.hostIP), "76.105.238.167", _TRUNCATE);
-                session->data.hostPort = 25565;
-                wcsncpy_s(session->data.hostName, XUSER_NAME_SIZE, L"Server", _TRUNCATE);
-                session->data.isJoinable = true;
-                session->data.isReadyToJoin = true;
-                session->data.maxPlayers = MINECRAFT_NET_MAX_PLAYERS;
-
-                ProfileManager.SetLockedProfile(0);
-                DWORD dwLocalUsersMask = CGameNetworkManager::GetLocalPlayerMask(ProfileManager.GetPrimaryPad());
-
-                Minecraft::GetInstance()->clearConnectionFailed();
-                CGameNetworkManager::eJoinGameResult result = g_NetworkManager.JoinGame(session, dwLocalUsersMask);
-
-                if (result != CGameNetworkManager::JOINGAME_SUCCESS)
-                {
-                    m_bIgnoreInput = false;
-                    delete session;
-                }
+                wstring lastIp = replaceAll(Minecraft::GetInstance()->options->lastMpIp, L"_", L":");
+                InputManager.RequestKeyboard(L"Enter Server IP", lastIp.c_str(), (DWORD)m_iPad, 128, &UIScene_LoadOrJoinMenu::JoinByIPKeyboardCallback, this, C_4JInput::EKeyboardMode_Default);
             }
             else if (lGenID < m_generators.size())
             {
