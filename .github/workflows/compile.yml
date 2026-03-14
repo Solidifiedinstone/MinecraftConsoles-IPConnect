@@ -21,16 +21,24 @@ jobs:
 
       - name: Compile
         shell: cmd
-        run: |
-          set CL=/diagnostics:classic
-          cmake --build build --config Release -- /p:UseStructuredOutput=false
+        run: cmake --build build --config Release -- /p:UseStructuredOutput=false > build_log.txt 2>&1
+        continue-on-error: true
 
-      - name: Check output
+      - name: Show build log tail
         if: always()
         shell: cmd
         run: |
-          dir build\Release\ 2>nul || echo No Release directory found
-          dir build\Release\*.exe 2>nul || echo No exe files found
+          echo === LAST 200 LINES OF BUILD LOG ===
+          powershell -Command "Get-Content build_log.txt -Tail 200"
+          echo === ERRORS ===
+          findstr /I /C:"error" /C:"fatal" /C:"LNK" build_log.txt || echo No errors found in log
+
+      - name: Upload build log
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-log
+          path: build_log.txt
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
