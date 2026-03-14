@@ -2,6 +2,7 @@
 #include "UI.h"
 #include "UIScene_LoadOrJoinMenu.h"
 #include "..\..\ConnectScreen.h"
+#include "..\..\Options.h"
 
 #include "..\..\..\Minecraft.World\StringHelpers.h"
 #include "..\..\..\Minecraft.World\net.minecraft.world.item.h"
