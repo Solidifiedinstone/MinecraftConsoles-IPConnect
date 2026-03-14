@@ -21,7 +21,9 @@ jobs:
 
       - name: Compile
         shell: cmd
-        run: cmake --build build --config Release
+        run: |
+          set CL=/diagnostics:classic
+          cmake --build build --config Release -- /p:UseStructuredOutput=false
 
       - name: Check output
         if: always()
