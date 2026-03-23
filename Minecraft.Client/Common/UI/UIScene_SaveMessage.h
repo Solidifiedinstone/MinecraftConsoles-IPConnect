@@ -11,6 +11,7 @@ private:
 	};
 
 	bool m_bIgnoreInput;
+	int m_autoSkipDelay;
 
 	UIControl_Button m_buttonConfirm;
 	UIControl_Label m_labelDescription;

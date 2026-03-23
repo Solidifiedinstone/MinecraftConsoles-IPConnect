@@ -38,6 +38,7 @@ UIScene_SaveMessage::UIScene_SaveMessage(int iPad, void *initData, UILayer *pare
 	}
 
 	m_bIgnoreInput=false;
+	m_autoSkipDelay=0;
 
 	// 4J-TomK - rebuild touch after auto resize
 #ifdef __PSVITA__
@@ -66,13 +67,16 @@ void UIScene_SaveMessage::tick()
 	UIScene::tick();
 
 #ifdef _WINDOWS64
-	// Auto-skip save message when launched with -ip argument
+	// Auto-skip save message when launched with -ip argument (delay 30 ticks for UI init)
 	if (g_Win64MultiplayerJoin && !m_bIgnoreInput)
 	{
-		printf("[SaveMessage] Auto-skipping for -ip arg\n");
-		fflush(stdout);
-		m_bIgnoreInput = true;
-		ui.NavigateToHomeMenu();
+		if (++m_autoSkipDelay >= 30)
+		{
+			printf("[SaveMessage] Auto-skipping for -ip arg\n");
+			fflush(stdout);
+			bool handled = false;
+			handleInput(0, ACTION_MENU_OK, false, true, false, handled);
+		}
 	}
 #endif
 }

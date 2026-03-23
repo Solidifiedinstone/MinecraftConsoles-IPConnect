@@ -7,6 +7,7 @@ class UIScene_Intro : public UIScene
 private:
 	bool m_bIgnoreNavigate;
 	bool m_bAnimationEnded;
+	int m_autoSkipDelay;
 
 	IggyName m_funcSetIntroPlatform;
 #ifdef __PSVITA__

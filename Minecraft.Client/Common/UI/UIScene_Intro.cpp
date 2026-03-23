@@ -12,6 +12,7 @@ UIScene_Intro::UIScene_Intro(int iPad, void *initData, UILayer *parentLayer) : U
 	initialiseMovie();
 	m_bIgnoreNavigate = false;
 	m_bAnimationEnded = false;
+	m_autoSkipDelay = 0;
 
 	bool bSkipESRB = false;
 	bool bChina = false;
@@ -131,13 +132,16 @@ void UIScene_Intro::tick()
 	UIScene::tick();
 
 #ifdef _WINDOWS64
-	// Auto-skip intro when launched with -ip argument
+	// Auto-skip intro when launched with -ip argument (delay 60 ticks for UI init)
 	if (g_Win64MultiplayerJoin && !m_bIgnoreNavigate)
 	{
-		printf("[Intro] Auto-skipping intro for -ip arg\n");
-		fflush(stdout);
-		m_bIgnoreNavigate = true;
-		ui.NavigateToScene(0, eUIScene_SaveMessage);
+		if (++m_autoSkipDelay >= 60)
+		{
+			printf("[Intro] Auto-skipping intro for -ip arg\n");
+			fflush(stdout);
+			bool handled = false;
+			handleInput(0, ACTION_MENU_OK, false, true, false, handled);
+		}
 	}
 #endif
 }
