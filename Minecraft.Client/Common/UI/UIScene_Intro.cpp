@@ -1,6 +1,9 @@
 #include "stdafx.h"
 #include "UI.h"
 #include "UIScene_Intro.h"
+#ifdef _WINDOWS64
+#include "..\..\Windows64\Network\WinsockNetLayer.h"
+#endif
 
 
 UIScene_Intro::UIScene_Intro(int iPad, void *initData, UILayer *parentLayer) : UIScene(iPad, parentLayer)
@@ -122,6 +125,22 @@ void UIScene_Intro::handleTouchInput(unsigned int iPad, S32 x, S32 y, int iId, b
 	}
 }
 #endif
+
+void UIScene_Intro::tick()
+{
+	UIScene::tick();
+
+#ifdef _WINDOWS64
+	// Auto-skip intro when launched with -ip argument
+	if (g_Win64MultiplayerJoin && !m_bIgnoreNavigate)
+	{
+		printf("[Intro] Auto-skipping intro for -ip arg\n");
+		fflush(stdout);
+		m_bIgnoreNavigate = true;
+		ui.NavigateToScene(0, eUIScene_SaveMessage);
+	}
+#endif
+}
 
 void UIScene_Intro::handleAnimationEnd()
 {

@@ -1,6 +1,9 @@
 #include "stdafx.h"
 #include "UI.h"
 #include "UIScene_SaveMessage.h"
+#ifdef _WINDOWS64
+#include "..\..\Windows64\Network\WinsockNetLayer.h"
+#endif
 
 #define PROFILE_LOADED_TIMER_ID 0
 #define PROFILE_LOADED_TIMER_TIME 50
@@ -56,6 +59,22 @@ wstring UIScene_SaveMessage::getMoviePath()
 void UIScene_SaveMessage::updateTooltips()
 {
 	ui.SetTooltips( DEFAULT_XUI_MENU_USER, IDS_TOOLTIPS_SELECT );
+}
+
+void UIScene_SaveMessage::tick()
+{
+	UIScene::tick();
+
+#ifdef _WINDOWS64
+	// Auto-skip save message when launched with -ip argument
+	if (g_Win64MultiplayerJoin && !m_bIgnoreInput)
+	{
+		printf("[SaveMessage] Auto-skipping for -ip arg\n");
+		fflush(stdout);
+		m_bIgnoreInput = true;
+		ui.NavigateToHomeMenu();
+	}
+#endif
 }
 
 void UIScene_SaveMessage::handleInput(int iPad, int key, bool repeat, bool pressed, bool released, bool &handled)

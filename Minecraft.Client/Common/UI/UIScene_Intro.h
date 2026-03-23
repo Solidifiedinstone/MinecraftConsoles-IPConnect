@@ -42,6 +42,7 @@ public:
 	// INPUT
 	virtual void handleInput(int iPad, int key, bool repeat, bool pressed, bool released, bool &handled);
 
+	virtual void tick();
 	virtual void handleAnimationEnd();
 	virtual void handleGainFocus(bool navBack);
 

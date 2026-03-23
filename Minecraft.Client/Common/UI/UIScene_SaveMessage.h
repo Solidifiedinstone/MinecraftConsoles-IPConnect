@@ -41,6 +41,7 @@ protected:
 
 public:
 	// INPUT
+	virtual void tick();
 	virtual void handleInput(int iPad, int key, bool repeat, bool pressed, bool released, bool &handled);
 	virtual void handleTimerComplete(int id);
 
