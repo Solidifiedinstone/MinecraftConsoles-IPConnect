@@ -29,6 +29,7 @@
 #ifdef _WINDOWS64
 #include "..\..\..\Minecraft.World\NbtIo.h"
 #include "..\..\..\Minecraft.World\compression.h"
+#include "..\..\Windows64\Network\WinsockNetLayer.h"
 
 static wstring ReadLevelNameFromSaveFile(const wstring& filePath)
 {
@@ -599,6 +600,30 @@ void UIScene_LoadOrJoinMenu::handleGainFocus(bool navBack)
 
     // Add load online timer
     addTimer(JOIN_LOAD_ONLINE_TIMER_ID,JOIN_LOAD_ONLINE_TIMER_TIME);
+
+#ifdef _WINDOWS64
+    // Auto-connect when launched with -ip argument
+    if (!navBack && g_Win64MultiplayerJoin)
+    {
+        g_Win64MultiplayerJoin = false; // consume the flag so we don't retry on re-entry
+        app.DebugPrintf("Auto-connect: Connecting to %s:%d\n", g_Win64MultiplayerIP, g_Win64MultiplayerPort);
+
+        FriendSessionInfo *session = new FriendSessionInfo();
+        strncpy_s(session->data.hostIP, sizeof(session->data.hostIP), g_Win64MultiplayerIP, _TRUNCATE);
+        session->data.hostPort = g_Win64MultiplayerPort;
+        wcsncpy_s(session->data.hostName, XUSER_NAME_SIZE, L"Server", _TRUNCATE);
+        session->data.isJoinable = true;
+        session->data.isReadyToJoin = true;
+        session->data.maxPlayers = MINECRAFT_NET_MAX_PLAYERS;
+
+        ProfileManager.SetLockedProfile(0);
+        DWORD dwLocalUsersMask = CGameNetworkManager::GetLocalPlayerMask(ProfileManager.GetPrimaryPad());
+        Minecraft::GetInstance()->clearConnectionFailed();
+        int joinResult = g_NetworkManager.JoinGame(session, dwLocalUsersMask);
+        app.DebugPrintf("Auto-connect: JoinGame returned %d\n", joinResult);
+        return;
+    }
+#endif
 
     if(navBack)
     {
