@@ -236,6 +236,8 @@ bool WinsockNetLayer::HostGame(int port, const char* bindIp)
 
 bool WinsockNetLayer::JoinGame(const char* ip, int port)
 {
+	printf("[WinsockNetLayer] JoinGame called: %s:%d\n", ip, port);
+	fflush(stdout);
 	if (!s_initialized && !Initialize()) return false;
 
 	s_isHost = false;
@@ -337,6 +339,8 @@ bool WinsockNetLayer::JoinGame(const char* ip, int port)
 	}
 	s_localSmallId = assignedSmallId;
 
+	printf("[WinsockNetLayer] Connected to %s:%d, assigned smallId=%d\n", ip, port, s_localSmallId);
+	fflush(stdout);
 	app.DebugPrintf("Win64 LAN: Connected to %s:%d, assigned smallId=%d\n", ip, port, s_localSmallId);
 
 	s_active = true;

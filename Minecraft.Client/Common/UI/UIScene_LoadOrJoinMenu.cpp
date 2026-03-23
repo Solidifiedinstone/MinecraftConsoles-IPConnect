@@ -723,7 +723,8 @@ void UIScene_LoadOrJoinMenu::tick()
                 if (g_Win64MultiplayerJoin)
                 {
                     g_Win64MultiplayerJoin = false;
-                    app.DebugPrintf("Auto-connect: Connecting to %s:%d\n", g_Win64MultiplayerIP, g_Win64MultiplayerPort);
+                    printf("Auto-connect: Connecting to %s:%d\n", g_Win64MultiplayerIP, g_Win64MultiplayerPort);
+                    fflush(stdout);
 
                     FriendSessionInfo *session = new FriendSessionInfo();
                     strncpy_s(session->data.hostIP, sizeof(session->data.hostIP), g_Win64MultiplayerIP, _TRUNCATE);
@@ -737,7 +738,8 @@ void UIScene_LoadOrJoinMenu::tick()
                     DWORD dwLocalUsersMask = CGameNetworkManager::GetLocalPlayerMask(ProfileManager.GetPrimaryPad());
                     Minecraft::GetInstance()->clearConnectionFailed();
                     int joinResult = g_NetworkManager.JoinGame(session, dwLocalUsersMask);
-                    app.DebugPrintf("Auto-connect: JoinGame returned %d\n", joinResult);
+                    printf("Auto-connect: JoinGame returned %d\n", joinResult);
+                    fflush(stdout);
                 }
 #endif
 
