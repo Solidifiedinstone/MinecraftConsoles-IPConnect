@@ -1512,7 +1512,12 @@ int UIScene_LoadOrJoinMenu::JoinByIPKeyboardCallback(LPVOID lpParam, bool bRes)
             ProfileManager.SetLockedProfile(0);
             DWORD dwLocalUsersMask = CGameNetworkManager::GetLocalPlayerMask(ProfileManager.GetPrimaryPad());
             mc->clearConnectionFailed();
-            g_NetworkManager.JoinGame(session, dwLocalUsersMask);
+            app.DebugPrintf("Join by IP: Connecting to %s:%d\n", hostBuf, port);
+            int joinResult = g_NetworkManager.JoinGame(session, dwLocalUsersMask);
+            if (joinResult != CGameNetworkManager::JOINGAME_SUCCESS)
+            {
+                app.DebugPrintf("Join by IP: JoinGame failed with result %d\n", joinResult);
+            }
         }
     }
     return 0;
