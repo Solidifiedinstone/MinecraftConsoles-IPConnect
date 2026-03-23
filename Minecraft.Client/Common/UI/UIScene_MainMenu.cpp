@@ -9,6 +9,9 @@
 #ifdef __ORBIS__
 #include <error_dialog.h>
 #endif
+#ifdef _WINDOWS64
+#include "..\..\Windows64\Network\WinsockNetLayer.h"
+#endif
 
 Random *UIScene_MainMenu::random = new Random();
 
@@ -1857,6 +1860,16 @@ void UIScene_MainMenu::RunUnlockOrDLC(int iPad)
 void UIScene_MainMenu::tick()
 {
 	UIScene::tick();
+
+#ifdef _WINDOWS64
+	// Auto-navigate to Start Game when launched with -ip argument
+	if (g_Win64MultiplayerJoin && eNavigateWhenReady < 0)
+	{
+		app.DebugPrintf("[MainMenu] Auto-connect: navigating to LoadOrJoinMenu for -ip arg\n");
+		ProfileManager.SetLockedProfile(ProfileManager.GetPrimaryPad());
+		proceedToScene(ProfileManager.GetPrimaryPad(), eUIScene_LoadOrJoinMenu);
+	}
+#endif
 
 	if ( (eNavigateWhenReady >= 0) )
 	{
