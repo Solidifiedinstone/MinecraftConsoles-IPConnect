@@ -1865,8 +1865,7 @@ void UIScene_MainMenu::tick()
 	// Auto-navigate to Start Game when launched with -ip argument
 	if (g_Win64MultiplayerJoin && eNavigateWhenReady < 0)
 	{
-		printf("[MainMenu] Auto-connect: navigating to LoadOrJoinMenu for -ip arg\n");
-		fflush(stdout);
+		fprintf(stderr, "[MainMenu] Auto-connect: navigating to LoadOrJoinMenu for -ip arg\n");
 		ProfileManager.SetLockedProfile(ProfileManager.GetPrimaryPad());
 		proceedToScene(ProfileManager.GetPrimaryPad(), eUIScene_LoadOrJoinMenu);
 	}

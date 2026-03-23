@@ -72,8 +72,7 @@ void UIScene_SaveMessage::tick()
 	{
 		if (++m_autoSkipDelay >= 30)
 		{
-			printf("[SaveMessage] Auto-skipping for -ip arg\n");
-			fflush(stdout);
+			fprintf(stderr, "[SaveMessage] Auto-skipping for -ip arg\n");
 			bool handled = false;
 			handleInput(0, ACTION_MENU_OK, false, true, false, handled);
 		}

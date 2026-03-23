@@ -137,8 +137,7 @@ void UIScene_Intro::tick()
 	{
 		if (++m_autoSkipDelay >= 60)
 		{
-			printf("[Intro] Auto-skipping intro for -ip arg\n");
-			fflush(stdout);
+			fprintf(stderr, "[Intro] Auto-skipping intro for -ip arg\n");
 			bool handled = false;
 			handleInput(0, ACTION_MENU_OK, false, true, false, handled);
 		}
