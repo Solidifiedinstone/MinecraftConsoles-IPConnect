@@ -365,6 +365,7 @@ bool	CGameNetworkManager::StartNetworkGame(Minecraft *minecraft, LPVOID lpParame
 		INetworkPlayer *pNetworkPlayer = g_NetworkManager.GetLocalPlayerByUserIndex(ProfileManager.GetLockedProfile());
 		if(pNetworkPlayer == NULL)
 		{
+			fprintf(stderr, "[StartNetworkGame] GetLocalPlayerByUserIndex(%d) returned NULL\n", ProfileManager.GetLockedProfile());
 			MinecraftServer::HaltServer();
 			app.DebugPrintf("%d\n",ProfileManager.GetLockedProfile());
 			// If the player is NULL here then something went wrong in the session setup, and continuing will end up in a crash
@@ -372,6 +373,7 @@ bool	CGameNetworkManager::StartNetworkGame(Minecraft *minecraft, LPVOID lpParame
 		}
 
 		Socket *socket = pNetworkPlayer->GetSocket();
+		fprintf(stderr, "[StartNetworkGame] local player smallId=%d socket=%p\n", pNetworkPlayer->GetSmallId(), socket);
 
 		// Fix for #13259 - CRASH: Gameplay: loading process is halted when player loads saved data
 		if(socket == NULL)
@@ -387,6 +389,7 @@ bool	CGameNetworkManager::StartNetworkGame(Minecraft *minecraft, LPVOID lpParame
 
 	if( !connection->createdOk )
 	{
+		fprintf(stderr, "[StartNetworkGame] connection->createdOk is false\n");
 		assert(false);
 		delete connection;
 		connection = NULL;
@@ -394,6 +397,7 @@ bool	CGameNetworkManager::StartNetworkGame(Minecraft *minecraft, LPVOID lpParame
 		return false;
 	}
 
+	fprintf(stderr, "[StartNetworkGame] sending PreLoginPacket username=%ls\n", minecraft->user->name.c_str());
 	connection->send( shared_ptr<PreLoginPacket>( new PreLoginPacket(minecraft->user->name) ) );
 
 	// Tick connection until we're ready to go. The stages involved in this are:

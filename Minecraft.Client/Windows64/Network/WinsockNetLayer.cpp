@@ -398,10 +398,12 @@ bool WinsockNetLayer::SendToSmallId(BYTE targetSmallId, const void* data, int da
 	{
 		SOCKET sock = GetSocketForSmallId(targetSmallId);
 		if (sock == INVALID_SOCKET) return false;
+		fprintf(stderr, "[WinsockNetLayer] SendToSmallId host->%d: %d bytes\n", targetSmallId, dataSize);
 		return SendOnSocket(sock, data, dataSize);
 	}
 	else
 	{
+		fprintf(stderr, "[WinsockNetLayer] SendToSmallId client->host: %d bytes\n", dataSize);
 		return SendOnSocket(s_hostConnectionSocket, data, dataSize);
 	}
 }

@@ -510,11 +510,7 @@ void Socket::SocketOutputStreamNetwork::writeWithFlags(byteArray b, unsigned int
 
 		if( m_queueIdx == SOCKET_SERVER_END )
 		{
-			//printf( "Sent %u bytes of data from \"%ls\" to \"%ls\"\n",
-			//buffer.dwDataSize,
-			//hostPlayer->GetGamertag(),
-			//m_socket->networkPlayer->GetGamertag());
-
+			fprintf(stderr, "[Socket] writeWithFlags SERVER_END: %u bytes host->client\n", buffer.dwDataSize);
 			hostPlayer->SendData(socketPlayer, buffer.pbyData, buffer.dwDataSize, lowPriority, requireAck);
 
 	// 		DWORD queueSize = hostPlayer->GetSendQueueSize( NULL, QNET_GETSENDQUEUESIZE_BYTES  );
@@ -526,11 +522,7 @@ void Socket::SocketOutputStreamNetwork::writeWithFlags(byteArray b, unsigned int
 		}
 		else
 		{
-			//printf( "Sent %u bytes of data from \"%ls\" to \"%ls\"\n",
-			//buffer.dwDataSize,
-			//m_socket->networkPlayer->GetGamertag(),
-			//hostPlayer->GetGamertag());
-
+			fprintf(stderr, "[Socket] writeWithFlags CLIENT_END: %u bytes client->host\n", buffer.dwDataSize);
 			socketPlayer->SendData(hostPlayer, buffer.pbyData, buffer.dwDataSize, lowPriority, requireAck);
 		}
 	}
