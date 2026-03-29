@@ -461,6 +461,8 @@ void Texture::blit(int x, int y, Texture *source, bool rotated)
 		}
 #else
 
+		int dstBufSize = ww * hh * 4;
+		int srcBufSize = sww * shh * 4;
 		for (int srcY = 0; srcY < shh; srcY++)
 		{
 			int dstY = yy + srcY;
@@ -481,6 +483,9 @@ void Texture::blit(int x, int y, Texture *source, bool rotated)
 				{
 					dstPos = (xx + srcX * ww * 4) + dstY * 4;
 				}
+
+				if (dstPos < 0 || dstPos + 3 >= dstBufSize) continue;
+				if (srcPos < 0 || srcPos + 3 >= srcBufSize) continue;
 
 				data[level]->put(dstPos + 0, srcBuffer->get(srcPos + 0));
 				data[level]->put(dstPos + 1, srcBuffer->get(srcPos + 1));
@@ -896,5 +901,6 @@ void Texture::updateOnGPU()
 
 ByteBuffer *Texture::getData(unsigned int level)
 {
+	if (level >= m_iMipLevels || level >= MAX_MIP_LEVELS) return NULL;
 	return data[level];
 }
