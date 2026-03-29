@@ -70,10 +70,9 @@ struct TextureInfo
 };
 
 GLFWwindow *g_window = nullptr;
-bool g_glReady = false;
+std::atomic<bool> g_glReady{false};
 std::thread::id g_renderThread;
 float g_clearRGBA[4] = {0.0f, 0.0f, 0.0f, 1.0f};
-int g_matrixMode = GL_MODELVIEW;
 int g_textureLevels = 1;
 int g_currentTexture = -1;
 int g_nextTextureId = 1;
@@ -291,9 +290,14 @@ static void onGlfwError(int code, const char *desc)
     std::fprintf(stderr, "[linuxgl] GLFW error %d: %s\n", code, desc ? desc : "(null)");
 }
 
+static std::mutex g_initMutex;
 static bool ensureGLReady()
 {
-    if (g_glReady)
+    if (g_glReady.load(std::memory_order_acquire))
+        return true;
+
+    std::lock_guard<std::mutex> lock(g_initMutex);
+    if (g_glReady.load(std::memory_order_relaxed))
         return true;
 
     static bool glfwInitDone = false;
@@ -341,7 +345,7 @@ static bool ensureGLReady()
     mcglClearColor(g_clearRGBA[0], g_clearRGBA[1], g_clearRGBA[2], g_clearRGBA[3]);
 
     g_renderThread = std::this_thread::get_id();
-    g_glReady = true;
+    g_glReady.store(true, std::memory_order_release);
     return true;
 }
 
@@ -590,7 +594,6 @@ void C4JRender::EndConditionalRendering() {}
 
 void C4JRender::MatrixMode(int type)
 {
-    g_matrixMode = type;
     ensureSoftMatrices();
     tl_softMatrices.mode = type;
     if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) mcglMatrixMode(mapMatrixMode(type));
@@ -598,22 +601,22 @@ void C4JRender::MatrixMode(int type)
 void C4JRender::MatrixSetIdentity()
 {
     matIdentity(currentSoftMatrix());
-    if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) { mcglMatrixMode(mapMatrixMode(g_matrixMode)); mcglLoadIdentity(); }
+    if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) { mcglMatrixMode(mapMatrixMode(tl_softMatrices.mode)); mcglLoadIdentity(); }
 }
 void C4JRender::MatrixTranslate(float x, float y, float z)
 {
     softTranslate(x, y, z);
-    if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) { mcglMatrixMode(mapMatrixMode(g_matrixMode)); mcglTranslatef(x, y, z); }
+    if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) { mcglMatrixMode(mapMatrixMode(tl_softMatrices.mode)); mcglTranslatef(x, y, z); }
 }
 void C4JRender::MatrixRotate(float angle, float x, float y, float z)
 {
     softRotateRadians(angle, x, y, z);
-    if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) { mcglMatrixMode(mapMatrixMode(g_matrixMode)); mcglRotatef(angle * (180.0f / 3.1415926535f), x, y, z); }
+    if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) { mcglMatrixMode(mapMatrixMode(tl_softMatrices.mode)); mcglRotatef(angle * (180.0f / 3.1415926535f), x, y, z); }
 }
 void C4JRender::MatrixScale(float x, float y, float z)
 {
     softScale(x, y, z);
-    if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) { mcglMatrixMode(mapMatrixMode(g_matrixMode)); mcglScalef(x, y, z); }
+    if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) { mcglMatrixMode(mapMatrixMode(tl_softMatrices.mode)); mcglScalef(x, y, z); }
 }
 void C4JRender::MatrixPerspective(float fovy, float aspect, float zNear, float zFar)
 {
@@ -625,13 +628,13 @@ void C4JRender::MatrixPerspective(float fovy, float aspect, float zNear, float z
     softFrustum(left, right, bottom, top, zNear, zFar);
 
     if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    mcglMatrixMode(mapMatrixMode(g_matrixMode));
+    mcglMatrixMode(mapMatrixMode(tl_softMatrices.mode));
     mcglFrustum((double)left, (double)right, (double)bottom, (double)top, (double)zNear, (double)zFar);
 }
 void C4JRender::MatrixOrthogonal(float left, float right, float bottom, float top, float zNear, float zFar)
 {
     softOrtho(left, right, bottom, top, zNear, zFar);
-    if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) { mcglMatrixMode(mapMatrixMode(g_matrixMode)); mcglOrtho(left, right, bottom, top, zNear, zFar); }
+    if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) { mcglMatrixMode(mapMatrixMode(tl_softMatrices.mode)); mcglOrtho(left, right, bottom, top, zNear, zFar); }
 }
 void C4JRender::MatrixPop()
 {
@@ -641,7 +644,7 @@ void C4JRender::MatrixPop()
         matCopy(currentSoftMatrix(), stack.back().data());
         stack.pop_back();
     }
-    if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) { mcglMatrixMode(mapMatrixMode(g_matrixMode)); mcglPopMatrix(); }
+    if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) { mcglMatrixMode(mapMatrixMode(tl_softMatrices.mode)); mcglPopMatrix(); }
 }
 void C4JRender::MatrixPush()
 {
@@ -649,12 +652,12 @@ void C4JRender::MatrixPush()
     std::array<float, 16> m = {};
     memcpy(m.data(), currentSoftMatrix(), sizeof(float) * 16);
     stack.push_back(m);
-    if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) { mcglMatrixMode(mapMatrixMode(g_matrixMode)); mcglPushMatrix(); }
+    if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) { mcglMatrixMode(mapMatrixMode(tl_softMatrices.mode)); mcglPushMatrix(); }
 }
 void C4JRender::MatrixMult(float *mat)
 {
     if (mat) matPostMul(currentSoftMatrix(), mat);
-    if (mat && ensureGLReady() && std::this_thread::get_id() == g_renderThread) { mcglMatrixMode(mapMatrixMode(g_matrixMode)); mcglMultMatrixf(mat); }
+    if (mat && ensureGLReady() && std::this_thread::get_id() == g_renderThread) { mcglMatrixMode(mapMatrixMode(tl_softMatrices.mode)); mcglMultMatrixf(mat); }
 }
 
 const float *C4JRender::MatrixGet(int type)
