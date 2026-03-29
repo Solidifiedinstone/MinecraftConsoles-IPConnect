@@ -9,23 +9,21 @@ wstring toLower(const wstring& a)
 
 wstring trimString(const wstring& a)
 {
-	wstring b;
-	int start = (int)a.find_first_not_of(L" \t\n\r");
-	int end = (int)a.find_last_not_of(L" \t\n\r");
-	if( start == wstring::npos ) start = 0;
-	if( end == wstring::npos ) end = (int)a.size()-1;
-	b = a.substr(start,(end-start)+1);
-	return b;
+	size_t start = a.find_first_not_of(L" \t\n\r");
+	if (start == wstring::npos) return L"";
+	size_t end = a.find_last_not_of(L" \t\n\r");
+	return a.substr(start, (end - start) + 1);
 }
 
 wstring replaceAll(const wstring& in, const wstring& replace, const wstring& with)
 {
+	if (replace.empty()) return in;
 	wstring out = in;
 	size_t pos = 0;
 	while( ( pos = out.find(replace, pos) ) != wstring::npos )
 	{
 		out.replace( pos, replace.length(), with );
-		pos++;
+		pos += with.length();
 	}
 	return out;
 }
@@ -51,9 +49,10 @@ wstring convStringToWstring(const string& converting)
 // to save having to clear it up everywhere this is used.
 const char *wstringtofilename(const wstring& name)
 {
-	static char buf[256];
-	assert(name.length()<256);
-	for(unsigned int i = 0; i < name.length(); i++ )
+	static char buf[1024];
+	unsigned int len = (unsigned int)name.length();
+	if (len >= sizeof(buf)) len = sizeof(buf) - 1;
+	for(unsigned int i = 0; i < len; i++ )
 	{
 		wchar_t c = name[i];
 #if defined __PS3__ || defined __ORBIS__ || defined _LINUX64
@@ -61,24 +60,23 @@ const char *wstringtofilename(const wstring& name)
 #else
 		if(c=='/') c='\\';
 #endif
-		assert(c<128);	// Will we have to do any conversion of non-ASCII characters in filenames?
-		buf[i] = (char)c;
+		buf[i] = (c < 128) ? (char)c : '_';
 	}
-	buf[name.length()] = 0;
+	buf[len] = 0;
 	return buf;
 }
 
 const char *wstringtochararray(const wstring& name)
 {
-	static char buf[256];
-	assert(name.length()<256);
-	for(unsigned int i = 0; i < name.length(); i++ )
+	static char buf[1024];
+	unsigned int len = (unsigned int)name.length();
+	if (len >= sizeof(buf)) len = sizeof(buf) - 1;
+	for(unsigned int i = 0; i < len; i++ )
 	{
 		wchar_t c = name[i];
-		assert(c<128);	// Will we have to do any conversion of non-ASCII characters in filenames?
-		buf[i] = (char)c;
+		buf[i] = (c < 128) ? (char)c : '_';
 	}
-	buf[name.length()] = 0;
+	buf[len] = 0;
 	return buf;
 }
 
