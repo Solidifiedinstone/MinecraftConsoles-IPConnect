@@ -468,6 +468,7 @@ HRESULT Compression::DecompressWithType(void *pDestination, unsigned int *pDestS
 				case Z_STREAM_ERROR:
 					(void)inflateEnd(&strm);
 					assert(false);
+					return uncompr;
 				}
 			} while (hr != Z_STREAM_END);
 
