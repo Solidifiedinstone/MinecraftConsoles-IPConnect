@@ -355,6 +355,27 @@ static inline void DeleteCriticalSection(CRITICAL_SECTION* cs)
  */
 typedef DWORD (WINAPI *LPTHREAD_START_ROUTINE)(LPVOID);
 
+/* File/thread/event wrappers so HANDLE ownership is type-safe. */
+#define _LINUX_FILE_HANDLE_MAGIC   0x46494C45u  /* 'FILE' */
+#define _LINUX_THREAD_HANDLE_MAGIC 0x54485244u  /* 'THRD' */
+#define _LINUX_EVENT_HANDLE_MAGIC  0x45564E54u  /* 'EVNT' */
+struct _LinuxFileHandle {
+    uint32_t magic;
+    FILE*    fp;
+};
+struct _LinuxThreadHandle {
+    uint32_t magic;
+    pthread_t tid;
+    BOOL joined;
+};
+struct _LinuxEventHandle {
+    uint32_t magic;
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    BOOL manualReset;
+    BOOL signaled;
+};
+
 struct _LinuxThreadData {
     LPTHREAD_START_ROUTINE func;
     LPVOID param;
@@ -378,27 +399,29 @@ static inline HANDLE CreateThread_Linux(
     DWORD                   /*dwCreationFlags*/,
     DWORD*                  lpThreadId)
 {
-    pthread_t* pt = (pthread_t*)malloc(sizeof(pthread_t));
-    if (!pt) return NULL;
+    _LinuxThreadHandle* th = (_LinuxThreadHandle*)malloc(sizeof(_LinuxThreadHandle));
+    if (!th) return NULL;
 
     struct _LinuxThreadData* td =
         (struct _LinuxThreadData*)malloc(sizeof(struct _LinuxThreadData));
-    if (!td) { free(pt); return NULL; }
+    if (!td) { free(th); return NULL; }
 
     td->func  = lpStartAddress;
     td->param = lpParameter;
 
-    if (pthread_create(pt, NULL, _LinuxThreadThunk, td) != 0) {
+    if (pthread_create(&th->tid, NULL, _LinuxThreadThunk, td) != 0) {
         free(td);
-        free(pt);
+        free(th);
         return NULL;
     }
+    th->magic = _LINUX_THREAD_HANDLE_MAGIC;
+    th->joined = FALSE;
 
     if (lpThreadId) {
-        *lpThreadId = (DWORD)(uintptr_t)*pt;
+        *lpThreadId = (DWORD)(uintptr_t)th->tid;
     }
 
-    return (HANDLE)pt;
+    return (HANDLE)th;
 }
 
 /* Convenience: map CreateThread to our Linux variant. */
@@ -406,15 +429,34 @@ static inline HANDLE CreateThread_Linux(
 #define CreateThread CreateThread_Linux
 #endif
 
-/* CloseHandle for thread handles produced by CreateThread_Linux. */
+/* CloseHandle: handles file, thread, and event HANDLEs. */
 static inline BOOL CloseHandle_Linux(HANDLE h)
 {
-    if (h && h != INVALID_HANDLE_VALUE) {
-        pthread_t* pt = (pthread_t*)h;
-        pthread_detach(*pt);
-        free(pt);
+    if (!h || h == INVALID_HANDLE_VALUE)
+        return TRUE;
+    _LinuxFileHandle* fh = (_LinuxFileHandle*)h;
+    if (fh->magic == _LINUX_FILE_HANDLE_MAGIC) {
+        fclose(fh->fp);
+        fh->magic = 0;
+        free(fh);
+        return TRUE;
     }
-    return TRUE;
+    _LinuxThreadHandle* th = (_LinuxThreadHandle*)h;
+    if (th->magic == _LINUX_THREAD_HANDLE_MAGIC) {
+        if (!th->joined) pthread_detach(th->tid);
+        th->magic = 0;
+        free(th);
+        return TRUE;
+    }
+    _LinuxEventHandle* ev = (_LinuxEventHandle*)h;
+    if (ev->magic == _LINUX_EVENT_HANDLE_MAGIC) {
+        pthread_mutex_destroy(&ev->mutex);
+        pthread_cond_destroy(&ev->cond);
+        ev->magic = 0;
+        free(ev);
+        return TRUE;
+    }
+    return FALSE;
 }
 
 #ifndef CloseHandle
@@ -428,16 +470,63 @@ static inline BOOL CloseHandle_Linux(HANDLE h)
 #ifndef WAIT_TIMEOUT
 #define WAIT_TIMEOUT   0x00000102L
 #endif
+#ifndef WAIT_ABANDONED
+#define WAIT_ABANDONED 0x00000080L
+#endif
+#ifndef WAIT_FAILED
+#define WAIT_FAILED    0xFFFFFFFF
+#endif
 #ifndef INFINITE
 #define INFINITE       0xFFFFFFFF
 #endif
 
-static inline DWORD WaitForSingleObject_Linux(HANDLE h, DWORD /*dwMilliseconds*/)
+static inline DWORD WaitForSingleObject_Linux(HANDLE h, DWORD dwMilliseconds)
 {
-    if (!h || h == INVALID_HANDLE_VALUE) return (DWORD)-1;
-    pthread_t* pt = (pthread_t*)h;
-    pthread_join(*pt, NULL);
-    return WAIT_OBJECT_0;
+    if (!h || h == INVALID_HANDLE_VALUE) return WAIT_FAILED;
+
+    _LinuxThreadHandle* th = (_LinuxThreadHandle*)h;
+    if (th->magic == _LINUX_THREAD_HANDLE_MAGIC) {
+        if (!th->joined) {
+            pthread_join(th->tid, NULL);
+            th->joined = TRUE;
+        }
+        return WAIT_OBJECT_0;
+    }
+
+    _LinuxEventHandle* ev = (_LinuxEventHandle*)h;
+    if (ev->magic == _LINUX_EVENT_HANDLE_MAGIC) {
+        pthread_mutex_lock(&ev->mutex);
+        if (!ev->signaled) {
+            if (dwMilliseconds == 0) {
+                pthread_mutex_unlock(&ev->mutex);
+                return WAIT_TIMEOUT;
+            }
+            if (dwMilliseconds == INFINITE) {
+                while (!ev->signaled) pthread_cond_wait(&ev->cond, &ev->mutex);
+            } else {
+                struct timespec ts;
+                clock_gettime(CLOCK_REALTIME, &ts);
+                ts.tv_sec += dwMilliseconds / 1000;
+                ts.tv_nsec += (long)(dwMilliseconds % 1000) * 1000000L;
+                if (ts.tv_nsec >= 1000000000L) {
+                    ts.tv_sec += 1;
+                    ts.tv_nsec -= 1000000000L;
+                }
+                while (!ev->signaled) {
+                    int rc = pthread_cond_timedwait(&ev->cond, &ev->mutex, &ts);
+                    if (rc == ETIMEDOUT) {
+                        pthread_mutex_unlock(&ev->mutex);
+                        return WAIT_TIMEOUT;
+                    }
+                }
+            }
+        }
+        if (!ev->manualReset) ev->signaled = FALSE;
+        pthread_mutex_unlock(&ev->mutex);
+        return WAIT_OBJECT_0;
+    }
+
+    return WAIT_FAILED;
 }
 
 #ifndef WaitForSingleObject
@@ -915,6 +1004,8 @@ static inline BOOL VirtualFree(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType
 #define FILE_CURRENT 1
 #define FILE_END 2
 
+static inline FILE* _lfh_fp(HANDLE h) { return ((_LinuxFileHandle*)h)->fp; }
+
 static inline HANDLE CreateFile(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,
     void* lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile) {
     (void)dwShareMode; (void)lpSecurityAttributes; (void)dwFlagsAndAttributes; (void)hTemplateFile;
@@ -924,19 +1015,24 @@ static inline HANDLE CreateFile(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD 
         else mode = "r+b";
     }
     FILE* f = fopen(lpFileName, mode);
-    return f ? (HANDLE)f : INVALID_HANDLE_VALUE;
+    if (!f) return INVALID_HANDLE_VALUE;
+    _LinuxFileHandle* h = (_LinuxFileHandle*)malloc(sizeof(_LinuxFileHandle));
+    if (!h) { fclose(f); return INVALID_HANDLE_VALUE; }
+    h->magic = _LINUX_FILE_HANDLE_MAGIC;
+    h->fp    = f;
+    return (HANDLE)h;
 }
 
 static inline BOOL ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead, LPDWORD lpNumberOfBytesRead, void* lpOverlapped) {
     (void)lpOverlapped;
-    size_t r = fread(lpBuffer, 1, nNumberOfBytesToRead, (FILE*)hFile);
+    size_t r = fread(lpBuffer, 1, nNumberOfBytesToRead, _lfh_fp(hFile));
     if (lpNumberOfBytesRead) *lpNumberOfBytesRead = (DWORD)r;
     return TRUE;
 }
 
 static inline BOOL WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite, LPDWORD lpNumberOfBytesWritten, void* lpOverlapped) {
     (void)lpOverlapped;
-    size_t w = fwrite(lpBuffer, 1, nNumberOfBytesToWrite, (FILE*)hFile);
+    size_t w = fwrite(lpBuffer, 1, nNumberOfBytesToWrite, _lfh_fp(hFile));
     if (lpNumberOfBytesWritten) *lpNumberOfBytesWritten = (DWORD)w;
     return TRUE;
 }
@@ -946,12 +1042,13 @@ static inline DWORD SetFilePointer(HANDLE hFile, LONG lDistanceToMove, PLONG lpD
     int origin = SEEK_SET;
     if (dwMoveMethod == FILE_CURRENT) origin = SEEK_CUR;
     else if (dwMoveMethod == FILE_END) origin = SEEK_END;
-    fseek((FILE*)hFile, lDistanceToMove, origin);
-    return (DWORD)ftell((FILE*)hFile);
+    FILE* f = _lfh_fp(hFile);
+    fseek(f, lDistanceToMove, origin);
+    return (DWORD)ftell(f);
 }
 
 static inline DWORD GetFileSize(HANDLE hFile, LPDWORD lpFileSizeHigh) {
-    FILE* f = (FILE*)hFile;
+    FILE* f = _lfh_fp(hFile);
     long cur = ftell(f);
     fseek(f, 0, SEEK_END);
     long size = ftell(f);
@@ -980,21 +1077,80 @@ static inline DWORD ResumeThread(HANDLE hThread) { (void)hThread; return 0; }
  *  Event API stubs
  * ==================================================================== */
 static inline HANDLE CreateEvent(void* lpEventAttributes, BOOL bManualReset, BOOL bInitialState, LPCSTR lpName) {
-    (void)lpEventAttributes; (void)bManualReset; (void)bInitialState; (void)lpName;
-    int* evt = (int*)malloc(sizeof(int));
-    if (evt) *evt = bInitialState ? 1 : 0;
-    return (HANDLE)evt;
+    (void)lpEventAttributes; (void)lpName;
+    _LinuxEventHandle* ev = (_LinuxEventHandle*)malloc(sizeof(_LinuxEventHandle));
+    if (!ev) return NULL;
+    ev->magic = _LINUX_EVENT_HANDLE_MAGIC;
+    ev->manualReset = bManualReset ? TRUE : FALSE;
+    ev->signaled = bInitialState ? TRUE : FALSE;
+    pthread_mutex_init(&ev->mutex, NULL);
+    pthread_cond_init(&ev->cond, NULL);
+    return (HANDLE)ev;
 }
-static inline BOOL SetEvent(HANDLE hEvent) { if (hEvent) *(int*)hEvent = 1; return TRUE; }
-static inline BOOL ResetEvent(HANDLE hEvent) { if (hEvent) *(int*)hEvent = 0; return TRUE; }
+static inline BOOL SetEvent(HANDLE hEvent) {
+    if (!hEvent || hEvent == INVALID_HANDLE_VALUE) return FALSE;
+    _LinuxEventHandle* ev = (_LinuxEventHandle*)hEvent;
+    if (ev->magic != _LINUX_EVENT_HANDLE_MAGIC) return FALSE;
+    pthread_mutex_lock(&ev->mutex);
+    ev->signaled = TRUE;
+    if (ev->manualReset) pthread_cond_broadcast(&ev->cond);
+    else pthread_cond_signal(&ev->cond);
+    pthread_mutex_unlock(&ev->mutex);
+    return TRUE;
+}
+static inline BOOL ResetEvent(HANDLE hEvent) {
+    if (!hEvent || hEvent == INVALID_HANDLE_VALUE) return FALSE;
+    _LinuxEventHandle* ev = (_LinuxEventHandle*)hEvent;
+    if (ev->magic != _LINUX_EVENT_HANDLE_MAGIC) return FALSE;
+    pthread_mutex_lock(&ev->mutex);
+    ev->signaled = FALSE;
+    pthread_mutex_unlock(&ev->mutex);
+    return TRUE;
+}
 
 static inline DWORD WaitForMultipleObjects(DWORD nCount, const HANDLE* lpHandles, BOOL bWaitAll, DWORD dwMilliseconds) {
-    (void)bWaitAll; (void)dwMilliseconds;
-    for (DWORD i = 0; i < nCount; i++) {
-        if (lpHandles[i] && *(int*)lpHandles[i]) return i;
+    DWORD start = GetTickCount();
+    for (;;) {
+        if (bWaitAll) {
+            BOOL all = TRUE;
+            for (DWORD i = 0; i < nCount; i++) {
+                HANDLE h = lpHandles[i];
+                if (!h || h == INVALID_HANDLE_VALUE) return WAIT_FAILED;
+                _LinuxEventHandle* ev = (_LinuxEventHandle*)h;
+                if (ev->magic != _LINUX_EVENT_HANDLE_MAGIC) return WAIT_FAILED;
+                pthread_mutex_lock(&ev->mutex);
+                BOOL signaled = ev->signaled;
+                pthread_mutex_unlock(&ev->mutex);
+                if (!signaled) { all = FALSE; break; }
+            }
+            if (all) {
+                for (DWORD i = 0; i < nCount; i++) {
+                    _LinuxEventHandle* ev = (_LinuxEventHandle*)lpHandles[i];
+                    pthread_mutex_lock(&ev->mutex);
+                    if (!ev->manualReset) ev->signaled = FALSE;
+                    pthread_mutex_unlock(&ev->mutex);
+                }
+                return WAIT_OBJECT_0;
+            }
+        } else {
+            for (DWORD i = 0; i < nCount; i++) {
+                HANDLE h = lpHandles[i];
+                if (!h || h == INVALID_HANDLE_VALUE) continue;
+                _LinuxEventHandle* ev = (_LinuxEventHandle*)h;
+                if (ev->magic != _LINUX_EVENT_HANDLE_MAGIC) continue;
+                pthread_mutex_lock(&ev->mutex);
+                BOOL signaled = ev->signaled;
+                if (signaled && !ev->manualReset) ev->signaled = FALSE;
+                pthread_mutex_unlock(&ev->mutex);
+                if (signaled) return WAIT_OBJECT_0 + i;
+            }
+        }
+        if (dwMilliseconds != INFINITE) {
+            DWORD elapsed = GetTickCount() - start;
+            if (elapsed >= dwMilliseconds) return WAIT_TIMEOUT;
+        }
+        usleep(1000);
     }
-    usleep(1000);
-    return 0;
 }
 
 /* ====================================================================

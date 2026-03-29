@@ -57,6 +57,7 @@ if(UNIX AND NOT APPLE)
     "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Linux64/KeyboardMouseInput.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Linux64/Network/PosixNetLayer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Linux64/4JLibs/4J_Stubs.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Linux64/4JLibs/gl_api.cpp"
     # SentientManager stubs already in Extrax64Stubs.cpp
     # DynamicConfigurations stubs already in Extrax64Stubs.cpp
     # SocialManager stubs already in Extrax64Stubs.cpp
@@ -152,11 +153,14 @@ if(UNIX AND NOT APPLE)
   )
   find_package(Threads REQUIRED)
   find_package(PNG REQUIRED)
+  find_package(OpenGL REQUIRED)
   target_link_libraries(MinecraftClient PRIVATE
     MinecraftWorld
     Threads::Threads
     ${CMAKE_DL_LIBS}
     PNG::PNG
+    OpenGL::GL
+    glfw
   )
 else()
   target_include_directories(MinecraftClient PRIVATE

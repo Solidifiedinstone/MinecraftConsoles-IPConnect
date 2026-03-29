@@ -231,7 +231,12 @@ void Tesselator::useProjectedTexture(bool enable)
 
 void Tesselator::useCompactVertices(bool enable)
 {
+#ifdef __linux__
+	(void)enable;
+	useCompactFormat360 = false;
+#else
 	useCompactFormat360 = enable;
+#endif
 }
 
 bool Tesselator::getCompactVertices()

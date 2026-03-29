@@ -378,7 +378,16 @@ static void executeDraw(const DrawCall &call)
     mcglDisable(0x4001); // GL_LIGHT1
     mcglColor4ub(255, 255, 255, 255);
 
-    const int effectiveTextureId = call.textureId;
+    int effectiveTextureId = call.textureId;
+    if (effectiveTextureId <= 0)
+    {
+        if (g_currentTexture > 0)
+            effectiveTextureId = g_currentTexture;
+        else if (tl_currentTexture > 0)
+            effectiveTextureId = tl_currentTexture;
+        else
+            effectiveTextureId = g_sharedTextureId.load(std::memory_order_relaxed);
+    }
 
     if (effectiveTextureId > 0)
     {
@@ -757,6 +766,13 @@ bool C4JRender::CBuffCall(int index, bool /*full*/)
         local = it->second;
     }
     int replayTextureId = g_currentTexture;
+    if (replayTextureId <= 0)
+    {
+        if (tl_currentTexture > 0)
+            replayTextureId = tl_currentTexture;
+        else
+            replayTextureId = g_sharedTextureId.load(std::memory_order_relaxed);
+    }
     for (const DrawCall &src : local)
     {
         DrawCall c = src;

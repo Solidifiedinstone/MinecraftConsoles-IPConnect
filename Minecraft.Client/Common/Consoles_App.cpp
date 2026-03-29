@@ -4416,6 +4416,8 @@ void CMinecraftApp::loadMediaArchive()
 	mediapath = L"Common\\Media\\MediaDurango.arc";
 #elif __PSVITA__
 	mediapath = L"Common\\Media\\MediaPSVita.arc";
+#elif _LINUX64
+	mediapath = L"Common/Media/MediaWindows64.arc";
 #endif
 
 	if (!mediapath.empty())

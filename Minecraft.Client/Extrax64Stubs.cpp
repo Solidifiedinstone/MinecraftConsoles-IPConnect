@@ -398,6 +398,11 @@ HRESULT XMemDecompress(
 	SIZE_T SrcSize
 )
 {
+	(void)Context;
+	if (pDestination == NULL || pDestSize == NULL || pSource == NULL)
+		return E_INVALIDARG;
+	if (*pDestSize < SrcSize)
+		return E_FAIL;
 	memcpy(pDestination, pSource, SrcSize);
 	*pDestSize = SrcSize;
 	return S_OK;
@@ -429,6 +434,11 @@ HRESULT XMemCompress(
 	SIZE_T SrcSize
 )
 {
+	(void)Context;
+	if (pDestination == NULL || pDestSize == NULL || pSource == NULL)
+		return E_INVALIDARG;
+	if (*pDestSize < SrcSize)
+		return E_FAIL;
 	memcpy(pDestination, pSource, SrcSize);
 	*pDestSize = SrcSize;
 	return S_OK;

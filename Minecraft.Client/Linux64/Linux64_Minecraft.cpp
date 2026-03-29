@@ -173,7 +173,7 @@ static void LoadUsernameFromFile()
 	// Find last slash
 	char* lastSlash = strrchr(exePath, '/');
 	if (lastSlash)
-		*(lastSlash + 1) = '/0';
+		*(lastSlash + 1) = '\0';
 
 	char filePath[PATH_MAX] = {};
 	snprintf(filePath, sizeof(filePath), "%susername.txt", exePath);
@@ -187,7 +187,7 @@ static void LoadUsernameFromFile()
 			int buflen = (int)strlen(buf);
 			while (buflen > 0 && (buf[buflen - 1] == '/n' || buf[buflen - 1] == '/r' || buf[buflen - 1] == ' '))
 			{
-				buf[--buflen] = '/0';
+				buf[--buflen] = '\0';
 			}
 
 			if (buflen > 0)
@@ -442,7 +442,7 @@ int main(int argc, char* argv[])
 			char* lastSlash = strrchr(exePath, '/');
 			if (lastSlash)
 			{
-				*(lastSlash + 1) = '/0';
+				*(lastSlash + 1) = '\0';
 				chdir(exePath);
 			}
 		}
@@ -472,13 +472,21 @@ int main(int argc, char* argv[])
 	Minecraft* pMinecraft = InitialiseMinecraftRuntime();
 	if (pMinecraft == NULL)
 	{
-		fprintf(stderr, "Failed to initialise the Minecraft runtime./n");
+		fprintf(stderr, "Failed to initialise the Minecraft runtime.\n");
 		return 1;
+	}
+
+	// Linux UI flow is incomplete; auto-start a local session so rendering enters game state.
+	if (!g_Win64DedicatedServer)
+	{
+		app.TemporaryCreateGameStart();
+		app.SetGameStarted(true);
 	}
 
 	// Main game loop
 	while (!app.m_bShutdown)
 	{
+		RenderManager.StartFrame();
 		app.UpdateTime();
 
 		InputManager.Tick();
@@ -487,6 +495,10 @@ int main(int argc, char* argv[])
 		RenderManager.Tick();
 
 		g_NetworkManager.DoWork();
+		if (!app.GetGameStarted() && g_NetworkManager.IsInSession())
+		{
+			app.SetGameStarted(true);
+		}
 
 		// Render game graphics
 		if (app.GetGameStarted())
@@ -502,6 +514,8 @@ int main(int argc, char* argv[])
 			{
 				pMinecraft->tickAllConnections();
 			}
+			// Keep the core frame path active even before "game started" to avoid black frames.
+			pMinecraft->run_middle();
 		}
 
 		pMinecraft->soundEngine->playMusicTick();

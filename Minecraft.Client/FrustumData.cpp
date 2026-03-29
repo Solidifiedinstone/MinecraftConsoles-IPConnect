@@ -24,6 +24,10 @@ FrustumData::~FrustumData()
 
 bool FrustumData::pointInFrustum(float x, float y, float z)
 {
+#ifdef __linux__
+    (void)x; (void)y; (void)z;
+    return true;
+#else
     for (int i = 0; i < 6; i++)
     {
         if (m_Frustum[i][A] * x + m_Frustum[i][B] * y + m_Frustum[i][C] * z + m_Frustum[i][D] <= 0)
@@ -33,10 +37,15 @@ bool FrustumData::pointInFrustum(float x, float y, float z)
     }
     
     return true;
+#endif
 }
 
 bool FrustumData::sphereInFrustum(float x, float y, float z, float radius)
 {
+#ifdef __linux__
+	(void)x; (void)y; (void)z; (void)radius;
+	return true;
+#else
 	for (int i = 0; i < 6; i++)
 	{
 		if (m_Frustum[i][A] * x + m_Frustum[i][B] * y + m_Frustum[i][C] * z + m_Frustum[i][D] <= -radius)
@@ -46,10 +55,15 @@ bool FrustumData::sphereInFrustum(float x, float y, float z, float radius)
 	}
     
 	return true;
+#endif
 }
 
 bool FrustumData::cubeFullyInFrustum(double x1, double y1, double z1, double x2, double y2, double z2)
 {
+#ifdef __linux__
+    (void)x1; (void)y1; (void)z1; (void)x2; (void)y2; (void)z2;
+    return true;
+#else
     for (int i = 0; i < 6; i++)
     {
         if (!(m_Frustum[i][A] * (x1) + m_Frustum[i][B] * (y1) + m_Frustum[i][C] * (z1) + m_Frustum[i][D] > 0)) return false;
@@ -63,10 +77,15 @@ bool FrustumData::cubeFullyInFrustum(double x1, double y1, double z1, double x2,
     }
     
     return true;
+#endif
 }
 
 bool FrustumData::cubeInFrustum(double x1, double y1, double z1, double x2, double y2, double z2)
 {
+#ifdef __linux__
+    (void)x1; (void)y1; (void)z1; (void)x2; (void)y2; (void)z2;
+    return true;
+#else
     for (int i = 0; i < 6; i++)
     {
         if (m_Frustum[i][A] * (x1) + m_Frustum[i][B] * (y1) + m_Frustum[i][C] * (z1) + m_Frustum[i][D] > 0) continue;
@@ -82,6 +101,7 @@ bool FrustumData::cubeInFrustum(double x1, double y1, double z1, double x2, doub
     }
     
     return true;
+#endif
 }
 
 bool FrustumData::isVisible(AABB *aabb)

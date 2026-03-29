@@ -119,6 +119,9 @@ void CConsoleMinecraftApp::TemporaryCreateGameStart()
 	app.SetGameHostOption(eGameHostOption_HostCanChangeHunger, 1);
 	app.SetGameHostOption(eGameHostOption_HostCanBeInvisible, 1);
 
+	DWORD dwLocalUsersMask = g_NetworkManager.GetLocalPlayerMask(ProfileManager.GetPrimaryPad());
+	g_NetworkManager.HostGame(dwLocalUsersMask, false, false, MINECRAFT_NET_MAX_PLAYERS, 0);
+
 	param->settings = app.GetGameHostOption(eGameHostOption_All);
 
 	g_NetworkManager.FakeLocalPlayerJoined();
