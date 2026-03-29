@@ -728,10 +728,12 @@ using std::max;
 #define vsprintf_s(buf, sz, fmt, ap) vsnprintf((buf), (sz), (fmt), (ap))
 #endif
 #ifndef wcscpy_s
-#define wcscpy_s(dst, sz, src) wcsncpy((dst), (src), (sz))
+static inline void wcscpy_s_impl(wchar_t* dst, size_t sz, const wchar_t* src) { if (sz == 0) return; wcsncpy(dst, src, sz - 1); dst[sz - 1] = L'\0'; }
+#define wcscpy_s(dst, sz, src) wcscpy_s_impl((dst), (sz), (src))
 #endif
 #ifndef strcpy_s
-#define strcpy_s(dst, sz, src) strncpy((dst), (src), (sz))
+static inline void strcpy_s_impl(char* dst, size_t sz, const char* src) { if (sz == 0) return; strncpy(dst, src, sz - 1); dst[sz - 1] = '\0'; }
+#define strcpy_s(dst, sz, src) strcpy_s_impl((dst), (sz), (src))
 #endif
 #ifndef strcat_s
 #define strcat_s(dst, sz, src) strncat((dst), (src), (sz) - strlen(dst) - 1)
@@ -978,8 +980,12 @@ static inline DWORD timeGetTime(void)
 #define MAXULONG_PTR ((ULONG_PTR)~((ULONG_PTR)0))
 
 static inline LPVOID VirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect) {
-    (void)flAllocationType; (void)flProtect;
-    if (lpAddress) return lpAddress; // MEM_COMMIT on existing
+    (void)flProtect;
+    if (lpAddress) {
+        // MEM_COMMIT on existing: zero the memory as Windows VirtualAlloc does
+        if (flAllocationType & MEM_COMMIT) memset(lpAddress, 0, dwSize);
+        return lpAddress;
+    }
     void* p = malloc(dwSize);
     if (p) memset(p, 0, dwSize);
     return p;
@@ -1025,16 +1031,18 @@ static inline HANDLE CreateFile(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD 
 
 static inline BOOL ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead, LPDWORD lpNumberOfBytesRead, void* lpOverlapped) {
     (void)lpOverlapped;
-    size_t r = fread(lpBuffer, 1, nNumberOfBytesToRead, _lfh_fp(hFile));
+    FILE* f = _lfh_fp(hFile);
+    size_t r = fread(lpBuffer, 1, nNumberOfBytesToRead, f);
     if (lpNumberOfBytesRead) *lpNumberOfBytesRead = (DWORD)r;
-    return TRUE;
+    return (r > 0 || nNumberOfBytesToRead == 0 || !ferror(f)) ? TRUE : FALSE;
 }
 
 static inline BOOL WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite, LPDWORD lpNumberOfBytesWritten, void* lpOverlapped) {
     (void)lpOverlapped;
-    size_t w = fwrite(lpBuffer, 1, nNumberOfBytesToWrite, _lfh_fp(hFile));
+    FILE* f = _lfh_fp(hFile);
+    size_t w = fwrite(lpBuffer, 1, nNumberOfBytesToWrite, f);
     if (lpNumberOfBytesWritten) *lpNumberOfBytesWritten = (DWORD)w;
-    return TRUE;
+    return (w == nNumberOfBytesToWrite) ? TRUE : FALSE;
 }
 
 static inline DWORD SetFilePointer(HANDLE hFile, LONG lDistanceToMove, PLONG lpDistanceToMoveHigh, DWORD dwMoveMethod) {
@@ -1177,7 +1185,19 @@ static inline void GlobalMemoryStatus(MEMORYSTATUS* lpBuffer) {
 /* ====================================================================
  *  GetSystemTime
  * ==================================================================== */
-static inline void GetSystemTime(SYSTEMTIME* st) { GetLocalTime(st); } // simplified
+static inline void GetSystemTime(SYSTEMTIME* st) {
+    time_t t = time(NULL);
+    struct tm utc;
+    gmtime_r(&t, &utc);
+    st->wYear = (WORD)(utc.tm_year + 1900);
+    st->wMonth = (WORD)(utc.tm_mon + 1);
+    st->wDayOfWeek = (WORD)utc.tm_wday;
+    st->wDay = (WORD)utc.tm_mday;
+    st->wHour = (WORD)utc.tm_hour;
+    st->wMinute = (WORD)utc.tm_min;
+    st->wSecond = (WORD)utc.tm_sec;
+    st->wMilliseconds = 0;
+}
 
 /* ====================================================================
  *  CreateFileMapping stub
