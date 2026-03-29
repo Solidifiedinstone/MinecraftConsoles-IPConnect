@@ -1,7 +1,5 @@
 #include "stdafx.h"
-#include "FrustumData.h"    
-
-float** m_Frustum;
+#include "FrustumData.h"
 
 
 FrustumData::FrustumData()
