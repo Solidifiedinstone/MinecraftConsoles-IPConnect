@@ -181,6 +181,7 @@ void Chunk::makeCopyForRebuild(Chunk *source)
 
 void Chunk::rebuild()
 {
+	if (!level) return;
 	PIXBeginNamedEvent(0,"Rebuilding chunk %d, %d, %d", x, y, z);
 #if defined __PS3__ && !defined DISABLE_SPU_CODE
 	rebuild_SPU();

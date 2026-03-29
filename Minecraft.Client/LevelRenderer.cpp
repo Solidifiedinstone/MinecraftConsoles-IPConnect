@@ -3326,6 +3326,7 @@ int LevelRenderer::getDimensionIndexFromId(int id)
 // in our (now finite) maps.
 int LevelRenderer::getGlobalIndexForChunk(int x, int y, int z, Level *level)
 {
+	if (!level) return -1;
 	return getGlobalIndexForChunk(x,y,z,level->dimension->id);
 }
 

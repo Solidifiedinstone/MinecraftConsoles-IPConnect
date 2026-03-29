@@ -1293,11 +1293,14 @@ int GameRenderer::runUpdate(LPVOID lpParam)
 		int count = 0;
 		static const int MAX_DEFERRED_UPDATES = 10;
 		bool shouldContinue = false;
-		do
+		if (minecraft->levelRenderer)
 		{
-			shouldContinue = minecraft->levelRenderer->updateDirtyChunks();
-			count++;
-		} while ( shouldContinue && count < MAX_DEFERRED_UPDATES );
+			do
+			{
+				shouldContinue = minecraft->levelRenderer->updateDirtyChunks();
+				count++;
+			} while ( shouldContinue && count < MAX_DEFERRED_UPDATES );
+		}
 
 		//		while( minecraft->levelRenderer->updateDirtyChunks() )
 		//			;
@@ -1305,7 +1308,8 @@ int GameRenderer::runUpdate(LPVOID lpParam)
 
 		// If any renderable tile entities were flagged in this last block of chunk(s) that were udpated, then change their
 		// flags to say that this deferred chunk is over and they are actually safe to be removed now
-		minecraft->levelRenderer->fullyFlagRenderableTileEntitiesToBeRemoved();
+		if (minecraft->levelRenderer)
+			minecraft->levelRenderer->fullyFlagRenderableTileEntitiesToBeRemoved();
 
 		// We've got stacks for things that can only safely be deleted whilst this thread isn't updating things - delete those things now
 		EnterCriticalSection(&m_csDeleteStack);

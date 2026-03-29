@@ -97,6 +97,7 @@ if(UNIX AND NOT APPLE)
     -Wno-switch
     -fpermissive
     -Wno-invalid-offsetof
+    -fcf-protection=none
   )
 else()
   target_compile_definitions(MinecraftWorld PRIVATE
@@ -147,12 +148,15 @@ if(UNIX AND NOT APPLE)
     -Wno-switch
     -fpermissive
     -Wno-invalid-offsetof
+    -fcf-protection=none
   )
   find_package(Threads REQUIRED)
+  find_package(PNG REQUIRED)
   target_link_libraries(MinecraftClient PRIVATE
     MinecraftWorld
     Threads::Threads
     ${CMAKE_DL_LIBS}
+    PNG::PNG
   )
 else()
   target_include_directories(MinecraftClient PRIVATE

@@ -14,6 +14,9 @@
 
 #include <cstring>
 #include <string>
+#include <cstdio>
+#include <cstdlib>
+#include <png.h>
 
 /* ====================================================================
  * Global singleton instances
@@ -120,15 +123,154 @@ void C4JRender::TextureSetParam(int /*param*/, int /*value*/) {}
 void C4JRender::TextureDynamicUpdateStart() {}
 void C4JRender::TextureDynamicUpdateEnd() {}
 
-HRESULT C4JRender::LoadTextureData(const char * /*szFilename*/, D3DXIMAGE_INFO *pSrcInfo, int ** /*ppDataOut*/)
+// ---- internal helper: decode raw libpng rows → new int[w*h] in ARGB format ----
+static int *pngRowsToARGB(png_structp png, png_infop info, int width, int height)
 {
-    if (pSrcInfo) { memset(pSrcInfo, 0, sizeof(D3DXIMAGE_INFO)); }
+    size_t row_bytes = png_get_rowbytes(png, info);
+    png_bytep *rows = (png_bytep *)malloc(height * sizeof(png_bytep));
+    if (!rows) return nullptr;
+    for (int y = 0; y < height; y++) {
+        rows[y] = (png_byte *)malloc(row_bytes);
+        if (!rows[y]) {
+            for (int j = 0; j < y; j++) free(rows[j]);
+            free(rows);
+            return nullptr;
+        }
+    }
+    png_read_image(png, rows);
+
+    int *pixels = new int[width * height];
+    for (int y = 0; y < height; y++) {
+        png_bytep row = rows[y];
+        for (int x = 0; x < width; x++) {
+            unsigned char r = row[x*4 + 0];
+            unsigned char g = row[x*4 + 1];
+            unsigned char b = row[x*4 + 2];
+            unsigned char a = row[x*4 + 3];
+            pixels[y * width + x] = ((int)a << 24) | ((int)r << 16) | ((int)g << 8) | (int)b;
+        }
+        free(rows[y]);
+    }
+    free(rows);
+    return pixels;
+}
+
+// ---- shared PNG setup: normalise any PNG variant to RGBA 8-bit ----
+static void pngSetupTransforms(png_structp png, png_infop info)
+{
+    png_byte color_type = png_get_color_type(png, info);
+    png_byte bit_depth  = png_get_bit_depth(png, info);
+
+    if (bit_depth == 16)
+        png_set_strip_16(png);
+    if (color_type == PNG_COLOR_TYPE_PALETTE)
+        png_set_palette_to_rgb(png);
+    if (color_type == PNG_COLOR_TYPE_GRAY && bit_depth < 8)
+        png_set_expand_gray_1_2_4_to_8(png);
+    if (png_get_valid(png, info, PNG_INFO_tRNS))
+        png_set_tRNS_to_alpha(png);
+    if (color_type == PNG_COLOR_TYPE_RGB ||
+        color_type == PNG_COLOR_TYPE_GRAY ||
+        color_type == PNG_COLOR_TYPE_PALETTE)
+        png_set_filler(png, 0xFF, PNG_FILLER_AFTER);
+    if (color_type == PNG_COLOR_TYPE_GRAY ||
+        color_type == PNG_COLOR_TYPE_GRAY_ALPHA)
+        png_set_gray_to_rgb(png);
+
+    png_read_update_info(png, info);
+}
+
+HRESULT C4JRender::LoadTextureData(const char *szFilename, D3DXIMAGE_INFO *pSrcInfo, int **ppDataOut)
+{
+    if (pSrcInfo)  memset(pSrcInfo, 0, sizeof(D3DXIMAGE_INFO));
+    if (!ppDataOut) return E_INVALIDARG;
+    *ppDataOut = nullptr;
+    if (!szFilename) return E_INVALIDARG;
+
+    FILE *fp = fopen(szFilename, "rb");
+    if (!fp) return E_FAIL;
+
+    unsigned char sig[8];
+    if (fread(sig, 1, 8, fp) != 8 || png_sig_cmp(sig, 0, 8)) {
+        fclose(fp);
+        return E_FAIL;
+    }
+
+    png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
+    if (!png) { fclose(fp); return E_FAIL; }
+    png_infop info = png_create_info_struct(png);
+    if (!info) { png_destroy_read_struct(&png, nullptr, nullptr); fclose(fp); return E_FAIL; }
+
+    if (setjmp(png_jmpbuf(png))) {
+        png_destroy_read_struct(&png, &info, nullptr);
+        fclose(fp);
+        return E_FAIL;
+    }
+
+    png_init_io(png, fp);
+    png_set_sig_bytes(png, 8);
+    png_read_info(png, info);
+
+    int width  = (int)png_get_image_width(png, info);
+    int height = (int)png_get_image_height(png, info);
+    pngSetupTransforms(png, info);
+
+    int *pixels = pngRowsToARGB(png, info, width, height);
+    png_destroy_read_struct(&png, &info, nullptr);
+    fclose(fp);
+
+    if (!pixels) return E_OUTOFMEMORY;
+
+    if (pSrcInfo) { pSrcInfo->Width = width; pSrcInfo->Height = height; }
+    *ppDataOut = pixels;
     return S_OK;
 }
 
-HRESULT C4JRender::LoadTextureData(BYTE * /*pbData*/, DWORD /*dwBytes*/, D3DXIMAGE_INFO *pSrcInfo, int ** /*ppDataOut*/)
+// Memory-buffer read callback for libpng
+struct PngMemState { const BYTE *data; DWORD size; DWORD pos; };
+static void pngMemRead(png_structp png, png_bytep dst, png_size_t len)
 {
-    if (pSrcInfo) { memset(pSrcInfo, 0, sizeof(D3DXIMAGE_INFO)); }
+    PngMemState *s = (PngMemState *)png_get_io_ptr(png);
+    if (s->pos + (DWORD)len > s->size) png_error(png, "read past end");
+    memcpy(dst, s->data + s->pos, len);
+    s->pos += (DWORD)len;
+}
+
+HRESULT C4JRender::LoadTextureData(BYTE *pbData, DWORD dwBytes, D3DXIMAGE_INFO *pSrcInfo, int **ppDataOut)
+{
+    if (pSrcInfo)  memset(pSrcInfo, 0, sizeof(D3DXIMAGE_INFO));
+    if (!ppDataOut) return E_INVALIDARG;
+    *ppDataOut = nullptr;
+    if (!pbData || dwBytes < 8) return E_INVALIDARG;
+
+    if (png_sig_cmp(pbData, 0, 8)) return E_FAIL;
+
+    png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
+    if (!png) return E_FAIL;
+    png_infop info = png_create_info_struct(png);
+    if (!info) { png_destroy_read_struct(&png, nullptr, nullptr); return E_FAIL; }
+
+    PngMemState state = { pbData, dwBytes, 8 };
+    if (setjmp(png_jmpbuf(png))) {
+        png_destroy_read_struct(&png, &info, nullptr);
+        return E_FAIL;
+    }
+
+    png_set_read_fn(png, &state, pngMemRead);
+    png_set_sig_bytes(png, 8);
+    png_read_info(png, info);
+
+    int width  = (int)png_get_image_width(png, info);
+    int height = (int)png_get_image_height(png, info);
+    pngSetupTransforms(png, info);
+
+    int *pixels = pngRowsToARGB(png, info, width, height);
+    png_destroy_read_struct(&png, &info, nullptr);
+
+    if (!pixels) return E_OUTOFMEMORY;
+
+    if (pSrcInfo) { pSrcInfo->Width = width; pSrcInfo->Height = height; }
+    *ppDataOut = pixels;
     return S_OK;
 }
 
@@ -456,9 +598,22 @@ unsigned int C4JStorage::CRC(unsigned char * /*buf*/, int /*len*/) { return 0; }
  *
  * ********************************************************************/
 
+// Per-player profile data buffer (zeroed on startup, sized by Initialise)
+static unsigned char s_profileData[4 * 4096];  // 4 players, up to 4 KiB each
+static int s_profileDataPerPlayer = 4096;
+
 void C_4JProfile::Initialise(DWORD /*dwTitleID*/, DWORD /*dwOfferID*/, unsigned short /*usProfileVersion*/,
                              UINT /*uiProfileValuesC*/, UINT /*uiProfileSettingsC*/, DWORD * /*pdwProfileSettingsA*/,
-                             int /*iGameDefinedDataSizeX4*/, unsigned int * /*puiGameDefinedDataChangedBitmask*/) {}
+                             int iGameDefinedDataSizeX4, unsigned int *puiGameDefinedDataChangedBitmask)
+{
+    if (iGameDefinedDataSizeX4 > 0) {
+        int perPlayer = iGameDefinedDataSizeX4 / 4;
+        if (perPlayer > 0 && perPlayer <= 4096)
+            s_profileDataPerPlayer = perPlayer;
+    }
+    memset(s_profileData, 0, sizeof(s_profileData));
+    if (puiGameDefinedDataChangedBitmask) *puiGameDefinedDataChangedBitmask = 0;
+}
 
 void C_4JProfile::SetTrialTextStringTable(CXuiStringTable * /*pStringTable*/, int /*iAccept*/, int /*iReject*/) {}
 void C_4JProfile::SetTrialAwardText(eAwardType /*AwardType*/, int /*iTitle*/, int /*iText*/) {}
@@ -578,7 +733,11 @@ C_4JProfile::PROFILESETTINGS *C_4JProfile::GetDashboardProfileSettings(int /*iPa
 
 void C_4JProfile::WriteToProfile(int /*iQuadrant*/, bool /*bGameDefinedDataChanged*/, bool /*bOverride5MinuteLimitOnProfileWrites*/) {}
 void C_4JProfile::ForceQueuedProfileWrites(int /*iPad*/) {}
-void *C_4JProfile::GetGameDefinedProfileData(int /*iQuadrant*/) { return nullptr; }
+void *C_4JProfile::GetGameDefinedProfileData(int iQuadrant)
+{
+    if (iQuadrant < 0 || iQuadrant >= 4) return nullptr;
+    return &s_profileData[iQuadrant * s_profileDataPerPlayer];
+}
 void C_4JProfile::ResetProfileProcessState() {}
 void C_4JProfile::Tick() {}
 
