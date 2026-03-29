@@ -34,45 +34,45 @@
 #include "FrustumCuller.h"
 #include "Camera.h"
 
-#include "..\Minecraft.World\MobEffect.h"
-#include "..\Minecraft.World\Difficulty.h"
-#include "..\Minecraft.World\net.minecraft.world.level.h"
-#include "..\Minecraft.World\net.minecraft.world.entity.h"
-#include "..\Minecraft.World\net.minecraft.world.entity.player.h"
-#include "..\Minecraft.World\net.minecraft.world.entity.item.h"
-#include "..\Minecraft.World\net.minecraft.world.phys.h"
-#include "..\Minecraft.World\File.h"
-#include "..\Minecraft.World\net.minecraft.world.level.storage.h"
-#include "..\Minecraft.World\net.minecraft.h"
-#include "..\Minecraft.World\net.minecraft.stats.h"
-#include "..\Minecraft.World\System.h"
-#include "..\Minecraft.World\ByteBuffer.h"
-#include "..\Minecraft.World\net.minecraft.world.level.tile.h"
-#include "..\Minecraft.World\net.minecraft.world.level.chunk.h"
-#include "..\Minecraft.World\net.minecraft.world.level.dimension.h"
-#include "..\Minecraft.World\net.minecraft.world.item.h"
-#include "..\Minecraft.World\Minecraft.World.h"
-#include "Windows64\Windows64_Xuid.h"
+#include "../Minecraft.World/MobEffect.h"
+#include "../Minecraft.World/Difficulty.h"
+#include "../Minecraft.World/net.minecraft.world.level.h"
+#include "../Minecraft.World/net.minecraft.world.entity.h"
+#include "../Minecraft.World/net.minecraft.world.entity.player.h"
+#include "../Minecraft.World/net.minecraft.world.entity.item.h"
+#include "../Minecraft.World/net.minecraft.world.phys.h"
+#include "../Minecraft.World/File.h"
+#include "../Minecraft.World/net.minecraft.world.level.storage.h"
+#include "../Minecraft.World/net.minecraft.h"
+#include "../Minecraft.World/net.minecraft.stats.h"
+#include "../Minecraft.World/System.h"
+#include "../Minecraft.World/ByteBuffer.h"
+#include "../Minecraft.World/net.minecraft.world.level.tile.h"
+#include "../Minecraft.World/net.minecraft.world.level.chunk.h"
+#include "../Minecraft.World/net.minecraft.world.level.dimension.h"
+#include "../Minecraft.World/net.minecraft.world.item.h"
+#include "../Minecraft.World/Minecraft.World.h"
+#include "Windows64/Windows64_Xuid.h"
 #include "ClientConnection.h"
-#include "..\Minecraft.World\HellRandomLevelSource.h"
-#include "..\Minecraft.World\net.minecraft.world.entity.animal.h"
-#include "..\Minecraft.World\net.minecraft.world.entity.monster.h"
-#include "..\Minecraft.World\StrongholdFeature.h"
-#include "..\Minecraft.World\IntCache.h"
-#include "..\Minecraft.World\Villager.h"
-#include "..\Minecraft.World\SparseLightStorage.h"
-#include "..\Minecraft.World\SparseDataStorage.h"
-#include "..\Minecraft.World\ChestTileEntity.h"
+#include "../Minecraft.World/HellRandomLevelSource.h"
+#include "../Minecraft.World/net.minecraft.world.entity.animal.h"
+#include "../Minecraft.World/net.minecraft.world.entity.monster.h"
+#include "../Minecraft.World/StrongholdFeature.h"
+#include "../Minecraft.World/IntCache.h"
+#include "../Minecraft.World/Villager.h"
+#include "../Minecraft.World/SparseLightStorage.h"
+#include "../Minecraft.World/SparseDataStorage.h"
+#include "../Minecraft.World/ChestTileEntity.h"
 #include "TextureManager.h"
 #ifdef _XBOX
-#include "Xbox\Network\NetworkPlayerXbox.h"
+#include "Xbox/Network/NetworkPlayerXbox.h"
 #endif
-#include "Common\UI\IUIScene_CreativeMenu.h"
-#include "Common\UI\UIFontData.h"
+#include "Common/UI/IUIScene_CreativeMenu.h"
+#include "Common/UI/UIFontData.h"
 #include "DLCTexturePack.h"
 
 #ifdef __ORBIS__
-#include "Orbis\Network\PsPlusUpsellWrapper_Orbis.h"
+#include "Orbis/Network/PsPlusUpsellWrapper_Orbis.h"
 #endif
 
 // #define DISABLE_SPU_CODE
@@ -131,7 +131,7 @@ Minecraft::Minecraft(Component *mouseComponent, Canvas *parent, MinecraftApplet 
 	particleEngine = NULL;
 	user = NULL;
 	parent = NULL;
-	pause = false;
+	paused = false;
 	textures = NULL;
 	font = NULL;
 	screen = NULL;
@@ -738,7 +738,7 @@ void Minecraft::run()
 		*/
 		checkGlError(L"Post render");
 		frames++;
-		pause = !isClientSide() && screen != NULL && screen->isPauseScreen();
+		paused = !isClientSide() && screen != NULL && screen->isPauseScreen();
 
 		while (System::currentTimeMillis() >= lastTime + 1000)
 		{
@@ -2058,9 +2058,9 @@ void Minecraft::run_middle()
 			checkGlError(L"Post render");
 			MemSect(0);
 			frames++;
-			//pause = !isClientSide() && screen != NULL && screen->isPauseScreen();
-			//pause = g_NetworkManager.IsLocalGame() && g_NetworkManager.GetPlayerCount() == 1 && app.IsPauseMenuDisplayed(ProfileManager.GetPrimaryPad());
-			pause = app.IsAppPaused();
+			//paused = !isClientSide() && screen != NULL && screen->isPauseScreen();
+			//paused = g_NetworkManager.IsLocalGame() && g_NetworkManager.GetPlayerCount() == 1 && app.IsPauseMenuDisplayed(ProfileManager.GetPrimaryPad());
+			paused = app.IsAppPaused();
 
 #ifndef _CONTENT_PACKAGE
 			while (System::nanoTime() >= lastTime + 1000000000)

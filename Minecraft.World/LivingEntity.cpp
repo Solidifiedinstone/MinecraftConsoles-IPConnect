@@ -24,9 +24,9 @@
 #include "net.minecraft.world.scores.h"
 #include "com.mojang.nbt.h"
 #include "LivingEntity.h"
-#include "..\Minecraft.Client\Textures.h"
-#include "..\Minecraft.Client\ServerLevel.h"
-#include "..\Minecraft.Client\EntityTracker.h"
+#include "../Minecraft.Client/Textures.h"
+#include "../Minecraft.Client/ServerLevel.h"
+#include "../Minecraft.Client/EntityTracker.h"
 #include "SoundTypes.h"
 #include "BasicTypeContainers.h"
 #include "ParticleTypes.h"
@@ -539,7 +539,7 @@ void LivingEntity::tickEffects()
 
 	if (colorValue > 0)
 	{
-		boolean doParticle = false;
+		bool doParticle = false;
 
 		if (!isInvisible())
 		{

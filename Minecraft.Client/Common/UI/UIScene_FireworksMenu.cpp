@@ -1,9 +1,9 @@
 #include "stdafx.h"
 #include "UI.h"
-#include "..\..\..\Minecraft.World\net.minecraft.world.level.tile.entity.h"
-#include "..\..\..\Minecraft.World\net.minecraft.world.inventory.h"
-#include "..\..\Minecraft.h"
-#include "..\..\LocalPlayer.h"
+#include "../../../Minecraft.World/net.minecraft.world.level.tile.entity.h"
+#include "../../../Minecraft.World/net.minecraft.world.inventory.h"
+#include "../../Minecraft.h"
+#include "../../LocalPlayer.h"
 #include "UIScene_FireworksMenu.h"
 
 UIScene_FireworksMenu::UIScene_FireworksMenu(int iPad, void *_initData, UILayer *parentLayer) : UIScene_AbstractContainerMenu(iPad, parentLayer)
@@ -221,7 +221,7 @@ UIControl *UIScene_FireworksMenu::getSection(ESceneSection eSection)
 }
 
 // bShow == true removes the 2x2 crafting grid and bShow == false removes the 3x3 crafting grid
-void UIScene_FireworksMenu::ShowLargeCraftingGrid(boolean bShow)
+void UIScene_FireworksMenu::ShowLargeCraftingGrid(bool bShow)
 {
 	app.DebugPrintf("ShowLargeCraftingGrid to %d\n", bShow);
 

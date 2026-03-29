@@ -6,7 +6,7 @@ typedef unsigned int DWORD;
 typedef unsigned char byte;
 #include <float.h>
 #else 
-#include "..\..\..\stdafx.h"
+#include "../../../stdafx.h"
 class ChunkRebuildData;
 #endif
 #endif
@@ -26,7 +26,7 @@ class Tesselator_SPU
 #ifndef  SN_TARGET_PS3_SPU
 	friend ChunkRebuildData;
 #endif
-    // private static boolean TRIANGLE_MODE = false;
+    // private static bool TRIANGLE_MODE = false;
 public:
 	static bool TRIANGLE_MODE;
     static bool USE_VBO;

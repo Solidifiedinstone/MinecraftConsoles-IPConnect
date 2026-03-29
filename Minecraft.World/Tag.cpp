@@ -47,12 +47,12 @@ bool Tag::equals(Tag *obj)
 	return true;
 }
 
-void Tag::print(ostream out)
+void Tag::print(ostream& out)
 {
 	out << "";
 }
 
-void Tag::print(char *prefix, wostream out)
+void Tag::print(char *prefix, wostream& out)
 {
 	wstring name = getName();
 
@@ -64,6 +64,11 @@ void Tag::print(char *prefix, wostream out)
 	}
 	out << L": ";
 	out << toString() << endl;
+}
+
+void Tag::print(char *prefix, ostream& out)
+{
+	out << prefix;
 }
 
 wstring Tag::getName()

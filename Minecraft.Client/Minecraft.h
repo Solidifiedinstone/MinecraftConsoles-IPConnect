@@ -38,9 +38,9 @@ class ColourTable;
 class MultiPlayerGameMode;
 class PsPlusUpsellWrapper;
 
-#include "..\Minecraft.World\File.h"
-#include "..\Minecraft.World\DisconnectPacket.h"
-#include "..\Minecraft.World\C4JThread.h"
+#include "../Minecraft.World/File.h"
+#include "../Minecraft.World/DisconnectPacket.h"
+#include "../Minecraft.World/C4JThread.h"
 #include "ResourceLocation.h"
 
 using namespace std;
@@ -49,7 +49,7 @@ class Minecraft
 {
 private:
 	enum  OS{
-		linux, solaris, windows, macos, unknown, xbox
+		os_linux, os_solaris, os_windows, os_macos, os_unknown, os_xbox
 	};
 
 	static ResourceLocation DEFAULT_FONT_LOCATION;
@@ -132,7 +132,7 @@ public:
 	bool appletMode;
 
 	// 4J - per player ?
-	volatile bool pause;
+	volatile bool paused;
 
 	Textures *textures;
 	Font *font, *altFont;

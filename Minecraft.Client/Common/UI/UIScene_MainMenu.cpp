@@ -1,16 +1,16 @@
 #include "stdafx.h"
-#include "..\..\..\Minecraft.World\Mth.h"
-#include "..\..\..\Minecraft.World\StringHelpers.h"
-#include "..\..\..\Minecraft.World\Random.h"
-#include "..\..\User.h"
-#include "..\..\MinecraftServer.h"
+#include "../../../Minecraft.World/Mth.h"
+#include "../../../Minecraft.World/StringHelpers.h"
+#include "../../../Minecraft.World/Random.h"
+#include "../../User.h"
+#include "../../MinecraftServer.h"
 #include "UI.h"
 #include "UIScene_MainMenu.h"
 #ifdef __ORBIS__
 #include <error_dialog.h>
 #endif
 #ifdef _WINDOWS64
-#include "..\..\Windows64\Network\WinsockNetLayer.h"
+#include "../../Windows64/Network/WinsockNetLayer.h"
 #endif
 
 Random *UIScene_MainMenu::random = new Random();
