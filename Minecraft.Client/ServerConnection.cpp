@@ -106,6 +106,7 @@ void ServerConnection::tick()
 		{
             players.erase(players.begin()+i);
 			i--;
+			continue;
         }
         player->connection->flush();
     }
