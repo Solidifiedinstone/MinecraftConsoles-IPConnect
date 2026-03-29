@@ -82,6 +82,7 @@ if(UNIX AND NOT APPLE)
     _DEBUG_MENUS_ENABLED
     _CRT_NON_CONFORMING_SWPRINTFS
     _CRT_SECURE_NO_WARNINGS
+    $<$<NOT:$<CONFIG:Debug>>:_FORTIFY_SOURCE=2>
     $<$<CONFIG:Debug>:_DEBUG>
   )
   set_target_properties(MinecraftWorld PROPERTIES CXX_STANDARD 14 CXX_STANDARD_REQUIRED ON)
@@ -98,7 +99,7 @@ if(UNIX AND NOT APPLE)
     -Wno-switch
     -fpermissive
     -Wno-invalid-offsetof
-    -fcf-protection=none
+    -fstack-protector-strong
   )
 else()
   target_compile_definitions(MinecraftWorld PRIVATE
@@ -133,6 +134,7 @@ if(UNIX AND NOT APPLE)
     _DEBUG_MENUS_ENABLED
     _CRT_NON_CONFORMING_SWPRINTFS
     _CRT_SECURE_NO_WARNINGS
+    $<$<NOT:$<CONFIG:Debug>>:_FORTIFY_SOURCE=2>
     $<$<CONFIG:Debug>:_DEBUG>
   )
   set_target_properties(MinecraftClient PROPERTIES CXX_STANDARD 14 CXX_STANDARD_REQUIRED ON)
@@ -149,7 +151,7 @@ if(UNIX AND NOT APPLE)
     -Wno-switch
     -fpermissive
     -Wno-invalid-offsetof
-    -fcf-protection=none
+    -fstack-protector-strong
   )
   find_package(Threads REQUIRED)
   find_package(PNG REQUIRED)
