@@ -52,7 +52,7 @@ bool WinsockNetLayer::s_clientRecvThreadValid = false;
 
 bool WinsockNetLayer::s_isHost = false;
 bool WinsockNetLayer::s_connected = false;
-bool WinsockNetLayer::s_active = false;
+volatile bool WinsockNetLayer::s_active = false;
 bool WinsockNetLayer::s_initialized = false;
 
 uint8_t WinsockNetLayer::s_localSmallId = 0;
@@ -841,7 +841,7 @@ bool WinsockNetLayer::StartAdvertising(int gamePort, const wchar_t* hostName, un
     s_advertiseData.netVersion = netVer;
     s_advertiseData.gamePort = (uint16_t)gamePort;
     wcsncpy(s_advertiseData.hostName, hostName, 31);
-    s_advertiseData.hostName[31] = L'/0';
+    s_advertiseData.hostName[31] = L'\0';
     s_advertiseData.playerCount = 1;
     s_advertiseData.maxPlayers = MINECRAFT_NET_MAX_PLAYERS;
     s_advertiseData.gameHostSettings = gameSettings;
@@ -1085,7 +1085,7 @@ void* WinsockNetLayer::DiscoveryThreadProc(void* param)
             {
                 s_discoveredSessions[i].netVersion = broadcast->netVersion;
                 wcsncpy(s_discoveredSessions[i].hostName, broadcast->hostName, 31);
-                s_discoveredSessions[i].hostName[31] = L'/0';
+                s_discoveredSessions[i].hostName[31] = L'\0';
                 s_discoveredSessions[i].playerCount = broadcast->playerCount;
                 s_discoveredSessions[i].maxPlayers = broadcast->maxPlayers;
                 s_discoveredSessions[i].gameHostSettings = broadcast->gameHostSettings;
@@ -1107,7 +1107,7 @@ void* WinsockNetLayer::DiscoveryThreadProc(void* param)
             session.hostPort = (int)broadcast->gamePort;
             session.netVersion = broadcast->netVersion;
             wcsncpy(session.hostName, broadcast->hostName, 31);
-            session.hostName[31] = L'/0';
+            session.hostName[31] = L'\0';
             session.playerCount = broadcast->playerCount;
             session.maxPlayers = broadcast->maxPlayers;
             session.gameHostSettings = broadcast->gameHostSettings;

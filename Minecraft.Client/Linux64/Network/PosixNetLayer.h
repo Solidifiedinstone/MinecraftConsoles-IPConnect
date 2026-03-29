@@ -120,7 +120,7 @@ private:
 
     static bool s_isHost;
     static bool s_connected;
-    static bool s_active;
+    static volatile bool s_active;
     static bool s_initialized;
 
     static uint8_t s_localSmallId;
