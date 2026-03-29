@@ -1325,7 +1325,7 @@ void C4JStorage::SetSaveDisabled(bool /*bDisable*/) {}
 bool C4JStorage::GetSaveDisabled() { return false; }
 unsigned int C4JStorage::GetSaveSize() { return 0; }
 void C4JStorage::GetSaveData(void * /*pvData*/, unsigned int * /*puiBytes*/) {}
-PVOID C4JStorage::AllocateSaveData(unsigned int /*uiBytes*/) { return nullptr; }
+PVOID C4JStorage::AllocateSaveData(unsigned int uiBytes) { return (uiBytes > 0) ? calloc(1, uiBytes) : nullptr; }
 void C4JStorage::SetSaveImages(PBYTE /*pbThumbnail*/, DWORD /*dwThumbnailBytes*/, PBYTE /*pbImage*/, DWORD /*dwImageBytes*/,
                                PBYTE /*pbTextData*/, DWORD /*dwTextDataBytes*/) {}
 
@@ -1470,7 +1470,16 @@ C4JStorage::ETMSStatus C4JStorage::TMSPP_ReadFile(int /*iPad*/, C4JStorage::eGlo
 
 // --- CRC ------------------------------------------------------------
 
-unsigned int C4JStorage::CRC(unsigned char * /*buf*/, int /*len*/) { return 0; }
+unsigned int C4JStorage::CRC(unsigned char *buf, int len) {
+    /* Standard CRC-32 (ISO 3309 / ITU-T V.42) */
+    unsigned int crc = 0xFFFFFFFF;
+    for (int i = 0; i < len; i++) {
+        crc ^= buf[i];
+        for (int j = 0; j < 8; j++)
+            crc = (crc >> 1) ^ (0xEDB88320 & (-(crc & 1)));
+    }
+    return ~crc;
+}
 
 
 /* ********************************************************************
