@@ -367,6 +367,8 @@ struct _LinuxThreadHandle {
     uint32_t magic;
     pthread_t tid;
     BOOL joined;
+    volatile BOOL finished;
+    DWORD exitCode;
 };
 struct _LinuxEventHandle {
     uint32_t magic;
@@ -379,6 +381,7 @@ struct _LinuxEventHandle {
 struct _LinuxThreadData {
     LPTHREAD_START_ROUTINE func;
     LPVOID param;
+    _LinuxThreadHandle* handle;
 };
 
 static inline void* _LinuxThreadThunk(void* arg)
@@ -386,8 +389,10 @@ static inline void* _LinuxThreadThunk(void* arg)
     struct _LinuxThreadData* td = (struct _LinuxThreadData*)arg;
     LPTHREAD_START_ROUTINE fn = td->func;
     LPVOID p = td->param;
+    _LinuxThreadHandle* th = td->handle;
     free(td);
-    fn(p);
+    DWORD ret = fn(p);
+    if (th) { th->exitCode = ret; th->finished = TRUE; }
     return NULL;
 }
 
@@ -406,16 +411,20 @@ static inline HANDLE CreateThread_Linux(
         (struct _LinuxThreadData*)malloc(sizeof(struct _LinuxThreadData));
     if (!td) { free(th); return NULL; }
 
+    th->magic = _LINUX_THREAD_HANDLE_MAGIC;
+    th->joined = FALSE;
+    th->finished = FALSE;
+    th->exitCode = 0;
+
     td->func  = lpStartAddress;
     td->param = lpParameter;
+    td->handle = th;
 
     if (pthread_create(&th->tid, NULL, _LinuxThreadThunk, td) != 0) {
         free(td);
         free(th);
         return NULL;
     }
-    th->magic = _LINUX_THREAD_HANDLE_MAGIC;
-    th->joined = FALSE;
 
     if (lpThreadId) {
         *lpThreadId = (DWORD)(uintptr_t)th->tid;
@@ -1078,7 +1087,17 @@ static inline DWORD GetLastError(void) { return (DWORD)errno; }
 
 static inline HANDLE GetCurrentThread(void) { return (HANDLE)(uintptr_t)pthread_self(); }
 static inline BOOL SetThreadPriority(HANDLE hThread, int nPriority) { (void)hThread; (void)nPriority; return TRUE; }
-static inline BOOL GetExitCodeThread(HANDLE hThread, LPDWORD lpExitCode) { (void)hThread; if (lpExitCode) *lpExitCode = 0; return TRUE; }
+static inline BOOL GetExitCodeThread(HANDLE hThread, LPDWORD lpExitCode) {
+    if (!lpExitCode) return FALSE;
+    _LinuxThreadHandle* th = (_LinuxThreadHandle*)hThread;
+    if (th && th->magic == _LINUX_THREAD_HANDLE_MAGIC) {
+        if (!th->finished) { *lpExitCode = STILL_ACTIVE; }
+        else { *lpExitCode = th->exitCode; }
+        return TRUE;
+    }
+    *lpExitCode = 0;
+    return TRUE;
+}
 static inline DWORD ResumeThread(HANDLE hThread) { (void)hThread; return 0; }
 
 /* ====================================================================
