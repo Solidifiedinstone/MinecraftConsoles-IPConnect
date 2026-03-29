@@ -270,8 +270,8 @@ void KeyboardMouseInput::SetWindowFocused(bool focused)
 float KeyboardMouseInput::GetMoveX() const
 {
 	float x = 0.0f;
-	if (m_keyDown[KEY_LEFT])  x += 1.0f;
-	if (m_keyDown[KEY_RIGHT]) x -= 1.0f;
+	if (m_keyDown[KEY_LEFT])  x -= 1.0f;
+	if (m_keyDown[KEY_RIGHT]) x += 1.0f;
 	return x;
 }
 
