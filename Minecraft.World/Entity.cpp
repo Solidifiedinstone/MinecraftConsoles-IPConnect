@@ -456,12 +456,9 @@ void Entity::setRot(float yRot, float xRot)
 	C++ Cannot do mod of non-integral type
 	*/
 
-	while( yRot >= 360.0f )
-		yRot -= 360.0f;
-	while( yRot < 0 )
-		yRot += 360.0f;
-	while( xRot >= 360.0f )
-		xRot -= 360.0f;
+	yRot = fmodf(yRot, 360.0f);
+	if (yRot < 0) yRot += 360.0f;
+	xRot = fmodf(xRot, 360.0f);
 
 	this->yRot = yRot;
 	this->xRot = xRot;
