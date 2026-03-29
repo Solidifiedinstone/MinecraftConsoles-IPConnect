@@ -659,7 +659,7 @@ void C4JRender::MatrixMult(float *mat)
 
 const float *C4JRender::MatrixGet(int type)
 {
-    static float mat[16];
+    static thread_local float mat[16];
     if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread)
     {
         memset(mat, 0, sizeof(mat));
