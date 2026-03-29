@@ -85,7 +85,8 @@ void PIXBeginNamedEvent(int a, char* b, ...)
 	char buf[512];
 	va_list args;
 	va_start(args, b);
-	vsprintf(buf, b, args);
+	vsnprintf(buf, sizeof(buf), b, args);
+	va_end(args);
 	sceRazorCpuPushMarker(buf, 0xffffffff, SCE_RAZOR_MARKER_ENABLE_HUD);
 
 #endif
@@ -94,7 +95,7 @@ void PIXBeginNamedEvent(int a, char* b, ...)
 	wchar_t wbuf[256];
 	va_list args;
 	va_start(args, b);
-	vsprintf(buf, b, args);
+	vsnprintf(buf, sizeof(buf), b, args);
 	snPushMarker(buf);
 
 	// 	mbstowcs(wbuf,buf,256);
@@ -177,11 +178,7 @@ void PIXSetMarkerDeprecated(int a, char* b, ...) {}
 
 bool IsEqualXUID(PlayerUID a, PlayerUID b)
 {
-#if defined(__PS3__) || defined(__ORBIS__) || defined (__PSVITA__) || defined(_DURANGO)
 	return (a == b);
-#else
-	return false;
-#endif
 }
 
 void XMemCpy(void* a, const void* b, size_t s) { memcpy(a, b, s); }
@@ -675,7 +672,7 @@ int					C_4JProfile::SetOldProfileVersionCallback(int(*Func)(LPVOID, unsigned ch
 // To store the dashboard preferences for controller flipped, etc.
 C_4JProfile::PROFILESETTINGS ProfileSettingsA[XUSER_MAX_COUNT];
 
-C_4JProfile::PROFILESETTINGS* C_4JProfile::GetDashboardProfileSettings(int iPad) { return &ProfileSettingsA[iPad]; }
+C_4JProfile::PROFILESETTINGS* C_4JProfile::GetDashboardProfileSettings(int iPad) { if (iPad < 0 || iPad >= XUSER_MAX_COUNT) return NULL; return &ProfileSettingsA[iPad]; }
 void				C_4JProfile::WriteToProfile(int iQuadrant, bool bGameDefinedDataChanged, bool bOverride5MinuteLimitOnProfileWrites) {}
 void				C_4JProfile::ForceQueuedProfileWrites(int iPad) {}
 void* C_4JProfile::GetGameDefinedProfileData(int iQuadrant)
@@ -684,6 +681,7 @@ void* C_4JProfile::GetGameDefinedProfileData(int iQuadrant)
 	//defaultOptionsCallback(lpProfileParam, (C_4JProfile::PROFILESETTINGS *)profileData[iQuadrant], iQuadrant);
 	//pApp->SetDefaultOptions(pSettings,iPad);
 
+	if (iQuadrant < 0 || iQuadrant >= 4) return NULL;
 	return profileData[iQuadrant];
 }
 void				C_4JProfile::ResetProfileProcessState() {}
