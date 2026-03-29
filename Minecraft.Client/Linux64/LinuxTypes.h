@@ -1399,10 +1399,11 @@ static inline BOOL FindNextFileW(HANDLE h, WIN32_FIND_DATA* d) { return FindNext
  *  End of header
  * ==================================================================== */
 
-/* _itow stub */
+/* _itow: convert int to wide string with radix support */
 static inline wchar_t* _itow(int value, wchar_t* str, int radix) {
-    (void)radix;
-    swprintf(str, 32, L"%d", value);
+    if (radix == 16)      swprintf(str, 32, L"%x", (unsigned)value);
+    else if (radix == 8)  swprintf(str, 32, L"%o", (unsigned)value);
+    else                  swprintf(str, 32, L"%d", value);
     return str;
 }
 #endif /* _MC_LINUX_TYPES_H */
@@ -1604,14 +1605,16 @@ static inline int _vsnprintf_s(char* buffer, size_t bufSize, size_t countOrTrunc
 }
 
 static inline int _i64toa_s(int64_t value, char* buffer, size_t sizeInCharacters, int radix) {
-    (void)radix;
-    snprintf(buffer, sizeInCharacters, "%lld", (long long)value);
+    if (radix == 16)      snprintf(buffer, sizeInCharacters, "%llx", (unsigned long long)value);
+    else if (radix == 8)  snprintf(buffer, sizeInCharacters, "%llo", (unsigned long long)value);
+    else                  snprintf(buffer, sizeInCharacters, "%lld", (long long)value);
     return 0;
 }
 
 static inline int _itoa_s(int value, char* buffer, size_t sizeInCharacters, int radix) {
-    (void)radix;
-    snprintf(buffer, sizeInCharacters, "%d", value);
+    if (radix == 16)      snprintf(buffer, sizeInCharacters, "%x", (unsigned)value);
+    else if (radix == 8)  snprintf(buffer, sizeInCharacters, "%o", (unsigned)value);
+    else                  snprintf(buffer, sizeInCharacters, "%d", value);
     return 0;
 }
 
