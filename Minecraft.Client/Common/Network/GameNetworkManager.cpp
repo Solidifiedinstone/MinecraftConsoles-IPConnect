@@ -461,7 +461,7 @@ bool	CGameNetworkManager::StartNetworkGame(Minecraft *minecraft, LPVOID lpParame
 			{
 				INetworkPlayer *pNetworkPlayer = g_NetworkManager.GetLocalPlayerByUserIndex(idx);
 				Socket *socket = pNetworkPlayer->GetSocket();
-				app.DebugPrintf("Closing socket due to player %d not being signed in any more\n");
+				app.DebugPrintf("Closing socket due to player %d not being signed in any more\n", idx);
 				if( !socket->close(false) ) socket->close(true);
 
 				continue;
