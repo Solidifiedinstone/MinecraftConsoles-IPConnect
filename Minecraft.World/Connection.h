@@ -73,6 +73,7 @@ private:
 	bool disconnected;
 	DisconnectPacket::eDisconnectReason disconnectReason;
 	void **disconnectReasonObjects; // 4J a pointer to an array.
+	std::vector<void*> disconnectReasonObjectsStorage;
 
 	int noInputTicks;
 	int estimatedRemaining;

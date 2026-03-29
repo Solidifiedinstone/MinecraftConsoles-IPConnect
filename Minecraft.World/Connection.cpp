@@ -189,17 +189,21 @@ bool Connection::writeTick()
 		return didSomething;
 
 	// try {
-	if (!outgoing.empty() && (fakeLag == 0 || System::currentTimeMillis() - outgoing.front()->createTime >= fakeLag))
 	{
 		shared_ptr<Packet> packet;
 
 		EnterCriticalSection(&writeLock);
-
-		packet = outgoing.front();
-		outgoing.pop();
-		estimatedRemaining -= packet->getEstimatedSize() + 1;
-
+		bool hasPacket = !outgoing.empty() && (fakeLag == 0 || System::currentTimeMillis() - outgoing.front()->createTime >= fakeLag);
+		if (hasPacket)
+		{
+			packet = outgoing.front();
+			outgoing.pop();
+			estimatedRemaining -= packet->getEstimatedSize() + 1;
+		}
 		LeaveCriticalSection(&writeLock);
+
+	if (hasPacket)
+	{
 
 		Packet::writePacket(packet, bufferedDos);
 		
@@ -231,20 +235,23 @@ bool Connection::writeTick()
 		writeSizes[packet->getId()] += packet->getEstimatedSize() + 1;
 		didSomething = true;
 	}
+	}
 
-	if ((slowWriteDelay-- <= 0) && !outgoing_slow.empty() && (fakeLag == 0 || System::currentTimeMillis() - outgoing_slow.front()->createTime >= fakeLag))
 	{
 		shared_ptr<Packet> packet;
 
-		//synchronized (writeLock) {
-
 		EnterCriticalSection(&writeLock);
-
-		packet = outgoing_slow.front();
-		outgoing_slow.pop();
-		estimatedRemaining -= packet->getEstimatedSize() + 1;
-
+		bool hasSlowPacket = (slowWriteDelay-- <= 0) && !outgoing_slow.empty() && (fakeLag == 0 || System::currentTimeMillis() - outgoing_slow.front()->createTime >= fakeLag);
+		if (hasSlowPacket)
+		{
+			packet = outgoing_slow.front();
+			outgoing_slow.pop();
+			estimatedRemaining -= packet->getEstimatedSize() + 1;
+		}
 		LeaveCriticalSection(&writeLock);
+
+	if (hasSlowPacket)
+	{
 
 		// If the shouldDelay flag is still set at this point then we want to write it to QNet as a single packet with priority flags
 		// Otherwise just buffer the packet with other outgoing packets as the java game did
@@ -292,6 +299,7 @@ bool Connection::writeTick()
 		writeSizes[packet->getId()] += packet->getEstimatedSize() + 1;
 		slowWriteDelay = 0;
 		didSomething = true;
+	}
 	}
 	/* 4J JEV, removed try/catch
 	} catch (Exception e) {
@@ -374,19 +382,23 @@ void Connection::close(DisconnectPacket::eDisconnectReason reason, ...)
 	va_list input;
 	va_start( input, reason );
 
-	disconnectReason = reason;//va_arg( input, const wstring );
+	disconnectReason = reason;
 
-	vector<void *> objs = vector<void *>();
-	void *i = NULL;
-	while (i != NULL)
+	// Store disconnect reason objects in the member vector so the data
+	// outlives this function call (previously used a stack-local vector
+	// whose data pointer dangled after return).
+	disconnectReasonObjectsStorage.clear();
+	void *arg = va_arg( input, void* );
+	while (arg != NULL)
 	{
-		i = va_arg( input, void* );
-		objs.push_back(i);
+		disconnectReasonObjectsStorage.push_back(arg);
+		arg = va_arg( input, void* );
 	}
+	va_end( input );
 
-	if( objs.size() )
+	if( !disconnectReasonObjectsStorage.empty() )
 	{
-		disconnectReasonObjects = &objs[0];
+		disconnectReasonObjects = &disconnectReasonObjectsStorage[0];
 	}
 	else
 	{
