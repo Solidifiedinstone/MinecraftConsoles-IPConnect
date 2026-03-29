@@ -903,6 +903,8 @@ void Tesselator::vertex(float x, float y, float z)
 	{
 		if (mode == GL_QUADS && TRIANGLE_MODE && count % 4 == 0)
 		{
+			// Need room for 2 duplicated verts + 1 new vert = 3*8 ints
+			if (p + 8 * 3 > size) { end(); tesselating = true; clear(); }
 			for (int i = 0; i < 2; i++)
 			{
 				int offs = 8 * (3 - i);
@@ -923,6 +925,14 @@ void Tesselator::vertex(float x, float y, float z)
 				vertices++;
 				p += 8;
 			}
+		}
+
+		// Bounds check: need room for 8 ints for this vertex
+		if (p + 8 > size)
+		{
+			end();
+			tesselating = true;
+			return;
 		}
 
 		if (hasTexture)
@@ -969,7 +979,7 @@ void Tesselator::vertex(float x, float y, float z)
 		p += 8;
 
 		vertices++;
-		if (vertices % 4 == 0 && p >= size - 8 * 4)
+		if (p >= size - 8 * 4)
 		{
 			end();
 			tesselating = true;
