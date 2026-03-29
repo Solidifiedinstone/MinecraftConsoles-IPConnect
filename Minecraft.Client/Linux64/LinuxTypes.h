@@ -1591,10 +1591,15 @@ static inline XMVECTOR XMVectorSet(float x, float y, float z, float w) {
 #define ERROR_CANCELLED 1223
 #define _TRUNCATE ((size_t)-1)
 
-/* _vsnprintf_s: MSVC has template overloads. For Linux, just use vsnprintf. */
-#define _vsnprintf_s(buf, ...) _linux_vsnprintf_s_impl(buf, sizeof(buf), __VA_ARGS__)
-static inline int _linux_vsnprintf_s_impl(char* buffer, size_t bufSize, size_t countOrTrunc, const char* format, va_list argptr) {
-    size_t sz = (countOrTrunc == (size_t)-1) ? bufSize : countOrTrunc;
+/* _vsnprintf_s: MSVC template overload deduces array size. Use C++ template on Linux too. */
+template<size_t N>
+static inline int _vsnprintf_s(char (&buffer)[N], size_t countOrTrunc, const char* format, va_list argptr) {
+    size_t sz = (countOrTrunc == (size_t)-1) ? N : (countOrTrunc < N ? countOrTrunc : N);
+    return vsnprintf(buffer, sz, format, argptr);
+}
+/* Fallback for pointer arguments (5-arg MSVC form) */
+static inline int _vsnprintf_s(char* buffer, size_t bufSize, size_t countOrTrunc, const char* format, va_list argptr) {
+    size_t sz = (countOrTrunc == (size_t)-1) ? bufSize : (countOrTrunc < bufSize ? countOrTrunc : bufSize);
     return vsnprintf(buffer, sz, format, argptr);
 }
 
