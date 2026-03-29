@@ -8,6 +8,7 @@
 // =============================================================================
 
 #include "stdafx.h"
+#include <mutex>
 
 // Pull in the UIController class definition (includes IUIController, UIEnums,
 // UIGroup, etc.)
@@ -83,10 +84,12 @@ UIController::UIController()
     m_lastUiSfx = 0;
     m_iPressStartQuadrantsMask = 0;
 
-    if (!ms_bReloadSkinCSInitialised)
     {
-        InitializeCriticalSection(&ms_reloadSkinCS);
-        ms_bReloadSkinCSInitialised = true;
+        static std::once_flag s_csOnce;
+        std::call_once(s_csOnce, []() {
+            InitializeCriticalSection(&ms_reloadSkinCS);
+            ms_bReloadSkinCSInitialised = true;
+        });
     }
 }
 
