@@ -268,7 +268,10 @@ void Packet::updatePacketStatsPIX()
 shared_ptr<Packet> Packet::getPacket(int id)
 {
 	// 4J: Removed try/catch
-	return idToCreateMap[id]();
+	auto it = idToCreateMap.find(id);
+	if (it == idToCreateMap.end() || !it->second)
+		return nullptr;
+	return it->second();
 }
 
 void Packet::writeBytes(DataOutputStream *dataoutputstream, byteArray bytes)
@@ -394,20 +397,14 @@ wstring Packet::readUtf(DataInputStream *dis, int maxLength) // throws IOExcepti
 {
 
 	short stringLength = dis->readShort();
-	if (stringLength > maxLength)
-	{
-		wstringstream stream;
-		stream << L"Received string length longer than maximum allowed (" << stringLength << " > " << maxLength << ")";
-		assert(false);
-		//        throw new IOException( stream.str() );
-	}
-	if (stringLength < 0)
+	if (stringLength > maxLength || stringLength < 0)
 	{
 		assert(false);
-		//        throw new IOException(L"Received string length is less than zero! Weird string!");
+		return L"";
 	}
 
 	wstring builder = L"";
+	builder.reserve(stringLength);
 	for (int i = 0; i < stringLength; i++)
 	{
 		wchar_t rc = dis->readChar();
