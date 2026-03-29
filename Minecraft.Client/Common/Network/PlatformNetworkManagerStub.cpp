@@ -485,6 +485,7 @@ void CPlatformNetworkManagerStub::SetPrivateGame(bool isPrivate)
 
 void CPlatformNetworkManagerStub::RegisterPlayerChangedCallback(int iPad, void (*callback)(void *callbackParam, INetworkPlayer *pPlayer, bool leaving), void *callbackParam)
 {
+	if (iPad < 0 || iPad >= XUSER_MAX_COUNT) return;
 	playerChangedCallback[iPad] = callback;
 	playerChangedCallbackParam[iPad] = callbackParam;
 }
@@ -817,8 +818,10 @@ void CPlatformNetworkManagerStub::SearchForGames()
 				info->data.isReadyToJoin = true;
 				info->data.isJoinable = true;
 				strncpy_s(info->data.hostIP, sizeof(info->data.hostIP), ip.c_str(), _TRUNCATE);
-				info->data.hostPort = stoi(port);
-				info->sessionId = (SessionID)(static_cast<uint64_t>(inet_addr(ip.c_str())) | (static_cast<uint64_t>(stoi(port)) << 32));
+				int parsedPort = 0;
+				try { parsedPort = stoi(port); } catch (...) { delete info; continue; }
+				info->data.hostPort = parsedPort;
+				info->sessionId = (SessionID)(static_cast<uint64_t>(inet_addr(ip.c_str())) | (static_cast<uint64_t>(parsedPort) << 32));
 				friendsSessions[0].push_back(info);
 			}
 		}
