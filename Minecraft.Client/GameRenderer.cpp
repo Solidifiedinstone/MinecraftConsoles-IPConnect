@@ -309,7 +309,7 @@ void GameRenderer::pick(float a)
 	vector<shared_ptr<Entity> > *objects = mc->level->getEntities(mc->cameraTargetPlayer, mc->cameraTargetPlayer->bb->expand(b->x * (range), b->y * (range), b->z * (range))->grow(overlap, overlap, overlap));
 	double nearest = dist;
 
-    for (auto& e : *objects )
+	for (auto& e : *objects )
     {
 		if ( e == nullptr || !e->isPickable() ) continue;
 
@@ -342,6 +342,7 @@ void GameRenderer::pick(float a)
 		}
 		delete p;
 	}
+	delete objects;
 
 	if (hovered != NULL)
 	{
@@ -580,7 +581,7 @@ void GameRenderer::moveCameraToPlayer(float a)
 
 void GameRenderer::zoomRegion(double zoom, double xa, double ya)
 {
-	zoom = zoom;
+	this->zoom = zoom;
 	zoom_x = xa;
 	zoom_y = ya;
 }
@@ -1230,29 +1231,33 @@ void GameRenderer::AddForDelete(byte *deleteThis)
 {
 	EnterCriticalSection(&m_csDeleteStack);
 	m_deleteStackByte.push_back(deleteThis);
+	LeaveCriticalSection(&m_csDeleteStack);
 }
 
 void GameRenderer::AddForDelete(SparseLightStorage *deleteThis)
 {
 	EnterCriticalSection(&m_csDeleteStack);
 	m_deleteStackSparseLightStorage.push_back(deleteThis);
+	LeaveCriticalSection(&m_csDeleteStack);
 }
 
 void GameRenderer::AddForDelete(CompressedTileStorage *deleteThis)
 {
 	EnterCriticalSection(&m_csDeleteStack);
 	m_deleteStackCompressedTileStorage.push_back(deleteThis);
+	LeaveCriticalSection(&m_csDeleteStack);
 }
 
 void GameRenderer::AddForDelete(SparseDataStorage *deleteThis)
 {
 	EnterCriticalSection(&m_csDeleteStack);
 	m_deleteStackSparseDataStorage.push_back(deleteThis);
+	LeaveCriticalSection(&m_csDeleteStack);
 }
 
 void GameRenderer::FinishedReassigning()
 {
-	LeaveCriticalSection(&m_csDeleteStack);
+	// Lock is now properly scoped per AddForDelete call -- no-op retained for API compat
 }
 
 int GameRenderer::runUpdate(LPVOID lpParam)
