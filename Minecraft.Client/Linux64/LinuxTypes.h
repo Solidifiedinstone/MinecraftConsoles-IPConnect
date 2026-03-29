@@ -1506,21 +1506,79 @@ static inline XMMATRIX XMMatrixMultiply(XMMATRIX a, XMMATRIX b) {
                 r.m[i][j] += a.m[i][k] * b.m[k][j];
     return r;
 }
-static inline XMVECTOR XMMatrixDeterminant(XMMATRIX m) {
-    (void)m;
-    XMVECTOR v = {1,0,0,0};
+static inline XMVECTOR XMMatrixDeterminant(XMMATRIX mt) {
+    const float (*a)[4] = mt.m;
+    float d =
+        a[0][0]*(a[1][1]*(a[2][2]*a[3][3]-a[2][3]*a[3][2])
+                 -a[1][2]*(a[2][1]*a[3][3]-a[2][3]*a[3][1])
+                 +a[1][3]*(a[2][1]*a[3][2]-a[2][2]*a[3][1]))
+       -a[0][1]*(a[1][0]*(a[2][2]*a[3][3]-a[2][3]*a[3][2])
+                 -a[1][2]*(a[2][0]*a[3][3]-a[2][3]*a[3][0])
+                 +a[1][3]*(a[2][0]*a[3][2]-a[2][2]*a[3][0]))
+       +a[0][2]*(a[1][0]*(a[2][1]*a[3][3]-a[2][3]*a[3][1])
+                 -a[1][1]*(a[2][0]*a[3][3]-a[2][3]*a[3][0])
+                 +a[1][3]*(a[2][0]*a[3][1]-a[2][1]*a[3][0]))
+       -a[0][3]*(a[1][0]*(a[2][1]*a[3][2]-a[2][2]*a[3][1])
+                 -a[1][1]*(a[2][0]*a[3][2]-a[2][2]*a[3][0])
+                 +a[1][2]*(a[2][0]*a[3][1]-a[2][1]*a[3][0]));
+    XMVECTOR v = {d, d, d, d};
     return v;
 }
-static inline XMMATRIX XMMatrixInverse(XMVECTOR* det, XMMATRIX m) {
-    (void)det;
-    return m; /* stub */
+static inline XMMATRIX XMMatrixInverse(XMVECTOR* det, XMMATRIX mt) {
+    const float (*s)[4] = mt.m;
+    /* Cofactor matrix via 2x2 determinant pairs */
+    float c00 = s[2][2]*s[3][3] - s[2][3]*s[3][2];
+    float c02 = s[2][1]*s[3][3] - s[2][3]*s[3][1];
+    float c03 = s[2][1]*s[3][2] - s[2][2]*s[3][1];
+    float c04 = s[2][0]*s[3][3] - s[2][3]*s[3][0];
+    float c06 = s[2][0]*s[3][2] - s[2][2]*s[3][0];
+    float c07 = s[2][0]*s[3][1] - s[2][1]*s[3][0];
+    float c08 = s[0][2]*s[1][3] - s[0][3]*s[1][2];
+    float c10 = s[0][1]*s[1][3] - s[0][3]*s[1][1];
+    float c11 = s[0][1]*s[1][2] - s[0][2]*s[1][1];
+    float c12 = s[0][0]*s[1][3] - s[0][3]*s[1][0];
+    float c14 = s[0][0]*s[1][2] - s[0][2]*s[1][0];
+    float c15 = s[0][0]*s[1][1] - s[0][1]*s[1][0];
+
+    float d = s[0][0]*(s[1][1]*c00 - s[1][2]*c02 + s[1][3]*c03)
+            - s[0][1]*(s[1][0]*c00 - s[1][2]*c04 + s[1][3]*c06)
+            + s[0][2]*(s[1][0]*c02 - s[1][1]*c04 + s[1][3]*c07)
+            - s[0][3]*(s[1][0]*c03 - s[1][1]*c06 + s[1][2]*c07);
+
+    if (det) { XMVECTOR dv = {d,d,d,d}; *det = dv; }
+    if (d == 0.0f) return mt; /* singular */
+    float inv = 1.0f / d;
+
+    XMMATRIX r;
+    r.m[0][0] = ( s[1][1]*c00 - s[1][2]*c02 + s[1][3]*c03) * inv;
+    r.m[0][1] = (-s[0][1]*c00 + s[0][2]*c02 - s[0][3]*c03) * inv;
+    r.m[0][2] = ( s[3][1]*c08 - s[3][2]*c10 + s[3][3]*c11) * inv;
+    r.m[0][3] = (-s[2][1]*c08 + s[2][2]*c10 - s[2][3]*c11) * inv;
+    r.m[1][0] = (-s[1][0]*c00 + s[1][2]*c04 - s[1][3]*c06) * inv;
+    r.m[1][1] = ( s[0][0]*c00 - s[0][2]*c04 + s[0][3]*c06) * inv;
+    r.m[1][2] = (-s[3][0]*c08 + s[3][2]*c12 - s[3][3]*c14) * inv;
+    r.m[1][3] = ( s[2][0]*c08 - s[2][2]*c12 + s[2][3]*c14) * inv;
+    r.m[2][0] = ( s[1][0]*c02 - s[1][1]*c04 + s[1][3]*c07) * inv;
+    r.m[2][1] = (-s[0][0]*c02 + s[0][1]*c04 - s[0][3]*c07) * inv;
+    r.m[2][2] = ( s[3][0]*c10 - s[3][1]*c12 + s[3][3]*c15) * inv;
+    r.m[2][3] = (-s[2][0]*c10 + s[2][1]*c12 - s[2][3]*c15) * inv;
+    r.m[3][0] = (-s[1][0]*c03 + s[1][1]*c06 - s[1][2]*c07) * inv;
+    r.m[3][1] = ( s[0][0]*c03 - s[0][1]*c06 + s[0][2]*c07) * inv;
+    r.m[3][2] = (-s[3][0]*c11 + s[3][1]*c14 - s[3][2]*c15) * inv;
+    r.m[3][3] = ( s[2][0]*c11 - s[2][1]*c14 + s[2][2]*c15) * inv;
+    return r;
 }
 static inline void XMStoreFloat4(XMFLOAT4* pDest, XMVECTOR v) {
     *pDest = v;
 }
-static inline XMVECTOR XMVector3TransformCoord(XMVECTOR v, XMMATRIX m) {
-    (void)m;
-    return v; /* stub */
+static inline XMVECTOR XMVector3TransformCoord(XMVECTOR v, XMMATRIX mt) {
+    float x = v.x*mt.m[0][0] + v.y*mt.m[1][0] + v.z*mt.m[2][0] + mt.m[3][0];
+    float y = v.x*mt.m[0][1] + v.y*mt.m[1][1] + v.z*mt.m[2][1] + mt.m[3][1];
+    float z = v.x*mt.m[0][2] + v.y*mt.m[1][2] + v.z*mt.m[2][2] + mt.m[3][2];
+    float w = v.x*mt.m[0][3] + v.y*mt.m[1][3] + v.z*mt.m[2][3] + mt.m[3][3];
+    if (w != 0.0f) { x /= w; y /= w; z /= w; }
+    XMVECTOR r = {x, y, z, 1.0f};
+    return r;
 }
 static inline XMVECTOR XMVectorSet(float x, float y, float z, float w) {
     XMVECTOR v = {x, y, z, w};
