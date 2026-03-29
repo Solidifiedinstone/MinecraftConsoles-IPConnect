@@ -60,7 +60,8 @@ bool Ghast::hurt(DamageSource *source, float dmg)
 		{
 			// reflected fireball, kill the ghast
 			FlyingMob::hurt(source, 1000);
-			dynamic_pointer_cast<Player>(source->getEntity())->awardStat(GenericStats::ghast(), GenericStats::param_ghast());
+			auto p = dynamic_pointer_cast<Player>(source->getEntity());
+			if (p) p->awardStat(GenericStats::ghast(), GenericStats::param_ghast());
 			return true;
 		}
 	}

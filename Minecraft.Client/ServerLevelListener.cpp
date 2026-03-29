@@ -49,7 +49,8 @@ void ServerLevelListener::entityRemoved(shared_ptr<Entity> entity)
 // 4J added
 void ServerLevelListener::playerRemoved(shared_ptr<Entity> entity)
 {
-	dynamic_pointer_cast<ServerPlayer>(entity)->getLevel()->getTracker()->removePlayer(entity);
+	auto sp = dynamic_pointer_cast<ServerPlayer>(entity);
+	if (sp && sp->getLevel()) sp->getLevel()->getTracker()->removePlayer(entity);
 }
 
 void ServerLevelListener::playSound(int iSound, double x, double y, double z, float volume, float pitch, float fClipSoundDist)
