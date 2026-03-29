@@ -294,7 +294,10 @@ bool	CGameNetworkManager::StartNetworkGame(Minecraft *minecraft, LPVOID lpParame
 		ServerStoppedCreate(true);
 		ServerReadyCreate(true);
 		// Ready to go - create actual networking thread & start hosting
-		C4JThread* thread = new C4JThread(&CGameNetworkManager::ServerThreadProc, lpParameter, "Server", 256 * 1024);
+		static C4JThread* s_serverThread = nullptr;
+		delete s_serverThread;
+		s_serverThread = new C4JThread(&CGameNetworkManager::ServerThreadProc, lpParameter, "Server", 256 * 1024);
+		C4JThread* thread = s_serverThread;
 #if defined __PS3__ || defined __PSVITA__
 		thread->SetPriority(THREAD_PRIORITY_BELOW_NORMAL);
 #endif //__PS3__
