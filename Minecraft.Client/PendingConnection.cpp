@@ -96,7 +96,7 @@ void PendingConnection::handlePreLogin(shared_ptr<PreLoginPacket> packet)
 void PendingConnection::sendPreLoginResponse()
 {
 	// 4J Stu - Calculate the players with UGC privileges set
-	PlayerUID *ugcXuids = new PlayerUID[MINECRAFT_NET_MAX_PLAYERS];
+	PlayerUID ugcXuids[MINECRAFT_NET_MAX_PLAYERS] = {};
 	DWORD ugcXuidCount = 0;
 	DWORD hostIndex = 0;
 	BYTE ugcFriendsOnlyBits = 0;
@@ -114,7 +114,7 @@ void PendingConnection::sendPreLoginResponse()
 
 		if( player != nullptr && player->connection->m_offlineXUID != INVALID_XUID && player->connection->m_onlineXUID != INVALID_XUID )
 		{
-			if( player->connection->m_friendsOnlyUGC )
+			if( player->connection->m_friendsOnlyUGC && ugcXuidCount < 8 )
 			{
 				ugcFriendsOnlyBits |= (1<<ugcXuidCount);
 			}
