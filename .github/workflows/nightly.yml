@@ -28,6 +28,9 @@ jobs:
     - name: Build
       run: MSBuild.exe MinecraftConsoles.sln /p:Configuration=Release /p:Platform="Windows64"
 
+    - name: Copy server.txt to release folder
+      run: copy server.txt x64\Release\server.txt
+
     - name: Zip Build
       run: 7z a -r LCEWindows64.zip ./x64/Release/*
 
