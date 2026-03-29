@@ -185,7 +185,7 @@ static void LoadUsernameFromFile()
 		if (fgets(buf, sizeof(buf), f))
 		{
 			int buflen = (int)strlen(buf);
-			while (buflen > 0 && (buf[buflen - 1] == '/n' || buf[buflen - 1] == '/r' || buf[buflen - 1] == ' '))
+			while (buflen > 0 && (buf[buflen - 1] == '\n' || buf[buflen - 1] == '\r' || buf[buflen - 1] == ' '))
 			{
 				buf[--buflen] = '\0';
 			}
