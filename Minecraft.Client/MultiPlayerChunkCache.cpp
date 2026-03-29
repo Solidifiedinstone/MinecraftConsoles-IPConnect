@@ -102,8 +102,8 @@ MultiPlayerChunkCache::~MultiPlayerChunkCache()
 {
 	delete emptyChunk;
 	delete waterChunk;
-	delete cache;
-	delete hasData;
+	delete[] cache;
+	delete[] hasData;
 
     for (auto& it : loadedChunkList)
     {

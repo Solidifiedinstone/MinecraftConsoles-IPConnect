@@ -19,7 +19,7 @@ AABB::ThreadStorage::ThreadStorage()
 
 AABB::ThreadStorage::~ThreadStorage()
 {
-	delete pool;
+	delete[] pool;
 }
 
 void AABB::CreateNewThreadStorage()

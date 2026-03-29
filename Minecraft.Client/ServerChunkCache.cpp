@@ -43,7 +43,7 @@ ServerChunkCache::~ServerChunkCache()
 {
 	storage->WaitForAll();		// MGH -  added to fix crash bug 175183
 	delete emptyChunk;
-	delete cache;
+	delete[] cache;
 	delete source;
 
 #ifdef _LARGE_WORLDS
@@ -51,7 +51,7 @@ ServerChunkCache::~ServerChunkCache()
 	{
 		delete m_unloadedCache[i];
 	}
-	delete m_unloadedCache;
+	delete[] m_unloadedCache;
 #endif
 
 	for (auto& it : m_loadedChunkList)
