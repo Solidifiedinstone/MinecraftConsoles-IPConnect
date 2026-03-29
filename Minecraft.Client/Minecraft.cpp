@@ -27,6 +27,7 @@
 #include "DeathScreen.h"
 #include "ErrorScreen.h"
 #include "TitleScreen.h"
+#include "ConnectScreen.h"
 #include "InventoryScreen.h"
 #include "InBedChatScreen.h"
 #include "AchievementPopup.h"
@@ -416,11 +417,65 @@ void Minecraft::init()
 
 	if (connectToIp != L"")	// 4J - was NULL comparison
 	{
-		//        setScreen(new ConnectScreen(this, connectToIp, connectToPort));		// 4J TODO - put back in
+		setScreen(new ConnectScreen(this, connectToIp, connectToPort));
 	}
 	else
 	{
-		setScreen(new TitleScreen());
+		// Try to auto-connect from server.txt in the working directory.
+		// Format: plain IP, IP:port, [IPv6]:port, or [IPv6]
+		wstring autoIp;
+		int autoPort = 25565;
+		{
+			HANDLE hServerFile = CreateFileW(L"server.txt", GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+			if (hServerFile != INVALID_HANDLE_VALUE)
+			{
+				char buf[256] = {};
+				DWORD bytesRead = 0;
+				ReadFile(hServerFile, buf, sizeof(buf) - 1, &bytesRead, NULL);
+				CloseHandle(hServerFile);
+				if (bytesRead > 0)
+				{
+					wchar_t wbuf[256] = {};
+					MultiByteToWideChar(CP_UTF8, 0, buf, -1, wbuf, 256);
+					wstring line(wbuf);
+					while (!line.empty() && (line.back() == L'\r' || line.back() == L'\n' || line.back() == L' '))
+						line.pop_back();
+					if (!line.empty() && line[0] == L'[')
+					{
+						// Bracketed IPv6: [addr]:port or [addr]
+						size_t closeBracket = line.find(L']');
+						if (closeBracket != wstring::npos)
+						{
+							autoIp = line.substr(1, closeBracket - 1);
+							if (closeBracket + 1 < line.size() && line[closeBracket + 1] == L':')
+							{
+								int p = _wtoi(line.substr(closeBracket + 2).c_str());
+								if (p > 0) autoPort = p;
+							}
+						}
+					}
+					else
+					{
+						// IPv4 or hostname: use rfind(':') to split off optional port
+						size_t colonPos = line.rfind(L':');
+						if (colonPos != wstring::npos && colonPos > 0)
+						{
+							autoIp = line.substr(0, colonPos);
+							int p = _wtoi(line.substr(colonPos + 1).c_str());
+							if (p > 0) autoPort = p;
+						}
+						else
+						{
+							autoIp = line;
+						}
+					}
+				}
+			}
+		}
+		if (!autoIp.empty())
+			setScreen(new ConnectScreen(this, autoIp, autoPort));
+		else
+			setScreen(new TitleScreen());
 	}
 	progressRenderer = new ProgressRenderer(this);
 
