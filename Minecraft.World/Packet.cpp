@@ -335,11 +335,11 @@ shared_ptr<Packet> Packet::readPacket(DataInputStream *dis, bool isServer) // th
 		//app.DebugPrintf("Bad packet id %d\n", id);
 		__debugbreak();
 		assert(false);
-		//            throw new IOException(wstring(L"Bad packet id ") + std::to_wstring(id));
+		return nullptr;
 	}
 
 	packet = getPacket(id);
-	if (packet == NULL) assert(false);//throw new IOException(wstring(L"Bad packet id ") + std::to_wstring(id));
+	if (packet == NULL) { assert(false); return nullptr; }
 
 	//app.DebugPrintf("%s reading packet %d\n", isServer ? "Server" : "Client", packet->getId());
 	packet->read(dis);
