@@ -789,6 +789,7 @@ void Minecraft::run()
 // 4J added - Selects which local player is currently active for processing by the existing minecraft code
 bool Minecraft::setLocalPlayerIdx(int idx)
 {
+	if (idx < 0 || idx >= XUSER_MAX_COUNT) return false;
 	localPlayerIdx = idx;
 	// If the player is not null, but the game mode is then this is just a temp player
 	// whose only real purpose is to hold the viewport position
