@@ -151,8 +151,8 @@ ClientConnection::~ClientConnection()
 
 void ClientConnection::tick()
 {
-	if (!done) connection->tick();
-	connection->flush();
+	if (!done && connection) connection->tick();
+	if (connection) connection->flush();
 }
 
 INetworkPlayer *ClientConnection::getNetworkPlayer()
@@ -427,6 +427,7 @@ void ClientConnection::handleAddEntity(shared_ptr<AddEntityPacket> packet)
 	{
 	case AddEntityPacket::MINECART:
 		e = Minecart::createMinecart(level, x, y, z, packet->data);
+		break;
 	case AddEntityPacket::FISH_HOOK:
 		{
 			// 4J Stu - Brought forward from 1.4 to be able to drop XP from fishing
@@ -1118,6 +1119,7 @@ void ClientConnection::handleChunkVisibility(shared_ptr<ChunkVisibilityPacket> p
 void ClientConnection::handleChunkTilesUpdate(shared_ptr<ChunkTilesUpdatePacket> packet)
 {
 	// 4J - changed to encode level in packet
+	if (packet->levelIdx < 0 || (unsigned)packet->levelIdx >= minecraft->levels.length) return;
 	MultiPlayerLevel *dimensionLevel = (MultiPlayerLevel *)minecraft->levels[packet->levelIdx];
 	if( dimensionLevel )
 	{
@@ -1187,6 +1189,7 @@ void ClientConnection::handleChunkTilesUpdate(shared_ptr<ChunkTilesUpdatePacket>
 void ClientConnection::handleBlockRegionUpdate(shared_ptr<BlockRegionUpdatePacket> packet)
 {
 	// 4J - changed to encode level in packet
+	if (packet->levelIdx < 0 || (unsigned)packet->levelIdx >= minecraft->levels.length) return;
 	MultiPlayerLevel *dimensionLevel = (MultiPlayerLevel *)minecraft->levels[packet->levelIdx];
 	if( dimensionLevel )
 	{
@@ -1244,6 +1247,7 @@ void ClientConnection::handleTileUpdate(shared_ptr<TileUpdatePacket> packet)
 		destroyTilePacket = true;
 	}
 	// 4J - changed to encode level in packet
+	if (packet->levelIdx < 0 || (unsigned)packet->levelIdx >= minecraft->levels.length) return;
 	MultiPlayerLevel *dimensionLevel = (MultiPlayerLevel *)minecraft->levels[packet->levelIdx];
 	if( dimensionLevel )
 	{
@@ -1460,7 +1464,7 @@ void ClientConnection::handleChat(shared_ptr<ChatPacket> packet)
 	case ChatPacket::e_ChatBedPlayerSleep:
 		message=app.GetString(IDS_TILE_BED_PLAYERSLEEP);
 		iPos=message.find(L"%s");
-		message.replace(iPos,2,playerDisplayName);
+		if (iPos != wstring::npos) message.replace(iPos,2,playerDisplayName);
 		break;
 	case ChatPacket::e_ChatBedMeSleep:
 		message=app.GetString(IDS_TILE_BED_MESLEEP);
@@ -1468,17 +1472,17 @@ void ClientConnection::handleChat(shared_ptr<ChatPacket> packet)
 	case ChatPacket::e_ChatPlayerJoinedGame:
 		message=app.GetString(IDS_PLAYER_JOINED);
 		iPos=message.find(L"%s");
-		message.replace(iPos,2,playerDisplayName);
+		if (iPos != wstring::npos) message.replace(iPos,2,playerDisplayName);
 		break;
 	case ChatPacket::e_ChatPlayerLeftGame:
 		message=app.GetString(IDS_PLAYER_LEFT);
 		iPos=message.find(L"%s");
-		message.replace(iPos,2,playerDisplayName);
+		if (iPos != wstring::npos) message.replace(iPos,2,playerDisplayName);
 		break;
 	case ChatPacket::e_ChatPlayerKickedFromGame:
 		message=app.GetString(IDS_PLAYER_KICKED);
 		iPos=message.find(L"%s");
-		message.replace(iPos,2,playerDisplayName);
+		if (iPos != wstring::npos) message.replace(iPos,2,playerDisplayName);
 		break;
 	case ChatPacket::e_ChatCannotPlaceLava:
 		displayOnGui = false;
@@ -1696,12 +1700,12 @@ void ClientConnection::handleChat(shared_ptr<ChatPacket> packet)
 	case ChatPacket::e_ChatPlayerEnteredEnd:
 		message=app.GetString(IDS_PLAYER_ENTERED_END);
 		iPos=message.find(L"%s");
-		message.replace(iPos,2,playerDisplayName);
+		if (iPos != wstring::npos) message.replace(iPos,2,playerDisplayName);
 		break;
 	case ChatPacket::e_ChatPlayerLeftEnd:
 		message=app.GetString(IDS_PLAYER_LEFT_END);
 		iPos=message.find(L"%s");
-		message.replace(iPos,2,playerDisplayName);
+		if (iPos != wstring::npos) message.replace(iPos,2,playerDisplayName);
 		break;
 
 	case ChatPacket::e_ChatPlayerMaxEnemies:
