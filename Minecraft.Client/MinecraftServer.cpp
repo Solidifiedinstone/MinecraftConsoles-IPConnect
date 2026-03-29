@@ -425,7 +425,7 @@ static bool ExecuteConsoleCommand(MinecraftServer *server, const wstring &rawCom
 			server->warn(L"Invalid aux value: " + tokens[4]);
 			return false;
 		}
-		if (itemId <= 0 || Item::items[itemId] == NULL)
+		if (itemId <= 0 || (unsigned)itemId >= Item::items.length || Item::items[itemId] == NULL)
 		{
 			server->warn(L"Unknown item id: " + std::to_wstring(itemId));
 			return false;
@@ -481,6 +481,11 @@ static bool ExecuteConsoleCommand(MinecraftServer *server, const wstring &rawCom
 			return false;
 		}
 
+		if (enchantmentId < 0 || (unsigned)enchantmentId >= Enchantment::enchantments.length)
+		{
+			server->warn(L"Unknown enchantment id: " + std::to_wstring(enchantmentId));
+			return false;
+		}
 		Enchantment *enchantment = Enchantment::enchantments[enchantmentId];
 		if (enchantment == NULL)
 		{
@@ -758,7 +763,7 @@ bool MinecraftServer::initServer(int64_t seed, NetworkGameInitData *initData, DW
 	// 4J delete passed in save data now - this is only required for the tutorial which is loaded by passing data directly in rather than using the storage manager
 	if( initData->saveData )
 	{
-		delete initData->saveData->data;
+		delete[] initData->saveData->data;
 		initData->saveData->data = 0;
 		initData->saveData->fileSize = 0;
 	}
