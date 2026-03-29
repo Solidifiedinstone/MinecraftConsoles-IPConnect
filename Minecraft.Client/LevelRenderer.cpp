@@ -417,7 +417,7 @@ void LevelRenderer::allChanged(int playerIndex)
 	// If this CS is entered before DisableUpdateThread is called then (on 360 at least) we can get a
 	// deadlock when starting a game in splitscreen.
 	//EnterCriticalSection(&m_csDirtyChunks);
-	if( level == NULL )
+	if( level[playerIndex] == NULL )
 	{
 		return;
 	}
