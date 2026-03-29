@@ -585,7 +585,7 @@ bool Wolf::wantsToAttack(shared_ptr<LivingEntity> target, shared_ptr<LivingEntit
 			return false;
 		}
 	}
-	if ( target->instanceof(eTYPE_PLAYER) && owner->instanceof(eTYPE_PLAYER) && !dynamic_pointer_cast<Player>(owner)->canHarmPlayer(dynamic_pointer_cast<Player>(target) ))
+	if ( target->instanceof(eTYPE_PLAYER) && owner && owner->instanceof(eTYPE_PLAYER) && !dynamic_pointer_cast<Player>(owner)->canHarmPlayer(dynamic_pointer_cast<Player>(target) ))
 	{
 		// pvp is off
 		return false;
