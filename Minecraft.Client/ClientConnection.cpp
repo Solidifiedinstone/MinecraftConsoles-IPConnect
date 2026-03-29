@@ -3675,9 +3675,11 @@ void ClientConnection::handleXZ(shared_ptr<XZPacket> packet)
 {
 	if(packet->action==XZPacket::STRONGHOLD)
 	{
-		minecraft->levels[0]->getLevelData()->setXStronghold(packet->x);
-		minecraft->levels[0]->getLevelData()->setZStronghold(packet->z);
-		minecraft->levels[0]->getLevelData()->setHasStronghold();
+		if (minecraft->levels[0] != NULL) {
+			minecraft->levels[0]->getLevelData()->setXStronghold(packet->x);
+			minecraft->levels[0]->getLevelData()->setZStronghold(packet->z);
+			minecraft->levels[0]->getLevelData()->setHasStronghold();
+		}
 	}
 }
 
