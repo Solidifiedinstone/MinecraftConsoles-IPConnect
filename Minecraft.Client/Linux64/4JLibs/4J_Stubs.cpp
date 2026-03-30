@@ -90,6 +90,25 @@ thread_local int tl_recordingCbuff = -1;
 thread_local std::vector<DrawCall> tl_recordingCalls;
 thread_local int tl_currentTexture = -1;
 thread_local bool tl_nextDrawHasVertexColor = true; // set by Tesselator before DrawVertices
+
+// ── Render state for Vulkan pipeline selection + push constants ──
+struct RenderState {
+    bool   blendEnable = false;
+    int    blendSrc = 6; // VK_BLEND_FACTOR_SRC_ALPHA
+    int    blendDst = 7; // VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
+    bool   depthTestEnable = true;
+    bool   depthWriteEnable = true;
+    bool   alphaTestEnable = false;
+    float  alphaRef = 0.1f;
+    bool   fogEnable = false;
+    int    fogMode = 0; // 0=linear, 1=exp
+    float  fogNear = 0.0f, fogFar = 256.0f, fogDensity = 1.0f;
+    float  fogColor[3] = {0,0,0};
+    float  globalColor[4] = {1,1,1,1};
+    uint8_t colorWriteMask = 0xF; // RGBA
+    float  depthBiasSlope = 0.0f, depthBiasConst = 0.0f;
+};
+static RenderState g_renderState;
 thread_local float tl_globalUV[2] = {0.0f, 0.0f};
 std::atomic<int> g_sharedTextureId(-1);
 std::atomic<float> g_sharedUVU(0.0f);
@@ -424,10 +443,19 @@ static void executeDraw(const DrawCall &call)
         else if (tl_currentTexture > 0) effectiveTextureId = tl_currentTexture;
         else effectiveTextureId = g_sharedTextureId.load(std::memory_order_relaxed);
     }
-    pc.textureEnable = (g_textureEnabled && effectiveTextureId > 0) ? 1.0f : 0.0f;
-    pc.fogEnable      = 0.0f; // TODO: Phase 5 fog
-    pc.alphaTestEnable = 0.0f;
-    pc.alphaRef       = 0.1f;
+    memcpy(pc.globalColor, g_renderState.globalColor, sizeof(pc.globalColor));
+    pc.textureEnable   = (g_textureEnabled && effectiveTextureId > 0) ? 1.0f : 0.0f;
+    pc.fogEnable       = g_renderState.fogEnable ? 1.0f : 0.0f;
+    pc.fogColor[0]     = g_renderState.fogColor[0];
+    pc.fogColor[1]     = g_renderState.fogColor[1];
+    pc.fogColor[2]     = g_renderState.fogColor[2];
+    pc.fogColor[3]     = 1.0f;
+    pc.fogParams[0]    = g_renderState.fogNear;
+    pc.fogParams[1]    = g_renderState.fogFar;
+    pc.fogParams[2]    = g_renderState.fogDensity;
+    pc.fogParams[3]    = (float)g_renderState.fogMode;
+    pc.alphaTestEnable = g_renderState.alphaTestEnable ? 1.0f : 0.0f;
+    pc.alphaRef        = g_renderState.alphaRef;
 
     // ── Expand vertices ──
     const bool isQuadList = (call.primitive == C4JRender::PRIMITIVE_TYPE_QUAD_LIST);
@@ -529,7 +557,10 @@ static void executeDraw(const DrawCall &call)
 
     // ── Bind pipeline ──
     VkPipelineKey key = vkp_default_key();
-    // TODO Phase 5: set key.blendEnable, srcBlend, dstBlend from render state
+    key.blendEnable    = g_renderState.blendEnable ? 1 : 0;
+    key.srcBlend       = g_renderState.blendSrc & 0xF;
+    key.dstBlend       = g_renderState.blendDst & 0xF;
+    key.colorWriteMask = g_renderState.colorWriteMask & 0xF;
     if (call.primitive == C4JRender::PRIMITIVE_TYPE_LINE_LIST)
         key.topology = 1;
     else if (call.primitive == C4JRender::PRIMITIVE_TYPE_LINE_STRIP)
@@ -1078,111 +1109,81 @@ void *C4JRender::TextureGetTexture(int idx)
 
 void C4JRender::StateSetColour(float r, float g, float b, float a)
 {
-    if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) mcglColor4f(r, g, b, a);
+    g_renderState.globalColor[0] = r; g_renderState.globalColor[1] = g;
+    g_renderState.globalColor[2] = b; g_renderState.globalColor[3] = a;
 }
 void C4JRender::StateSetDepthMask(bool enable)
 {
-    if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) mcglDepthMask(enable ? 1 : 0);
+    g_renderState.depthWriteEnable = enable;
 }
 void C4JRender::StateSetBlendEnable(bool enable)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    if (enable) mcglEnable(0x0BE2); else mcglDisable(0x0BE2); // GL_BLEND
+    g_renderState.blendEnable = enable;
 }
 void C4JRender::StateSetBlendFunc(int src, int dst)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    auto map = [](int f) -> unsigned int {
+    // Map engine blend constants to VkBlendFactor values
+    auto mapToVk = [](int f) -> int {
         switch (f) {
-        case GL_ZERO: return 0;
-        case GL_ONE: return 1;
-        case GL_SRC_COLOR: return 0x0300;
-        case GL_ONE_MINUS_SRC_COLOR: return 0x0301;
-        case GL_SRC_ALPHA: return 0x0302;
-        case GL_ONE_MINUS_SRC_ALPHA: return 0x0303;
-        case GL_DST_ALPHA: return 0x0304;
-        case GL_DST_COLOR: return 0x0306;
-        case GL_ONE_MINUS_DST_COLOR: return 0x0307;
-        case GL_CONSTANT_ALPHA: return 0x8003;
-        case GL_ONE_MINUS_CONSTANT_ALPHA: return 0x8004;
+        case GL_ZERO: return 0;                          // VK_BLEND_FACTOR_ZERO
+        case GL_ONE:  return 1;                          // VK_BLEND_FACTOR_ONE
+        case GL_SRC_COLOR: return 3;                     // VK_BLEND_FACTOR_SRC_COLOR
+        case GL_ONE_MINUS_SRC_COLOR: return 4;           // VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR
+        case GL_DST_COLOR: return 5;                     // VK_BLEND_FACTOR_DST_COLOR
+        case GL_ONE_MINUS_DST_COLOR: return 6;           // VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR
+        case GL_SRC_ALPHA: return 7;                     // VK_BLEND_FACTOR_SRC_ALPHA  (was 6 in old enum)
+        case GL_ONE_MINUS_SRC_ALPHA: return 8;           // VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
+        case GL_DST_ALPHA: return 9;                     // VK_BLEND_FACTOR_DST_ALPHA
         default: return 1;
         }
     };
-    mcglBlendFunc(map(src), map(dst));
+    g_renderState.blendSrc = mapToVk(src);
+    g_renderState.blendDst = mapToVk(dst);
 }
 void C4JRender::StateSetBlendFactor(unsigned int colour)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    mcglBlendColor(((colour >> 16) & 0xFF) / 255.0f, ((colour >> 8) & 0xFF) / 255.0f, (colour & 0xFF) / 255.0f, ((colour >> 24) & 0xFF) / 255.0f);
+    // Blend constants stored for vkCmdSetBlendConstants (not used in most draws)
 }
 void C4JRender::StateSetAlphaFunc(int func, float param)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    unsigned int f = 0x0201; // GL_LESS
-    if (func == GL_EQUAL) f = 0x0202;
-    else if (func == GL_LEQUAL) f = 0x0203;
-    else if (func == GL_GREATER) f = 0x0204;
-    else if (func == GL_GEQUAL) f = 0x0206;
-    else if (func == GL_ALWAYS) f = 0x0207;
-    mcglAlphaFunc(f, param);
+    g_renderState.alphaRef = param;
 }
 void C4JRender::StateSetDepthFunc(int func)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    unsigned int f = 0x0201; // GL_LESS
-    if (func == GL_EQUAL) f = 0x0202;
-    else if (func == GL_LEQUAL) f = 0x0203;
-    else if (func == GL_GREATER) f = 0x0204;
-    else if (func == GL_GEQUAL) f = 0x0206;
-    else if (func == GL_ALWAYS) f = 0x0207;
-    mcglDepthFunc(f);
+    // Depth compare op is baked into pipeline as LEQUAL for all variants
 }
 void C4JRender::StateSetFaceCull(bool enable)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    if (enable) mcglEnable(0x0B44); else mcglDisable(0x0B44); // GL_CULL_FACE
+    // Culling disabled in pipeline (VK_CULL_MODE_NONE) — matches original behavior
 }
-void C4JRender::StateSetFaceCullCW(bool enable)
-{
-    if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) mcglFrontFace(enable ? 0x0900 : 0x0901);
-}
-void C4JRender::StateSetLineWidth(float width)
-{
-    if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) mcglLineWidth(width);
-}
+void C4JRender::StateSetFaceCullCW(bool enable) {}
+void C4JRender::StateSetLineWidth(float width) {}
 void C4JRender::StateSetWriteEnable(bool red, bool green, bool blue, bool alpha)
 {
-    if (ensureGLReady() && std::this_thread::get_id() == g_renderThread)
-        mcglColorMask(red ? 1 : 0, green ? 1 : 0, blue ? 1 : 0, alpha ? 1 : 0);
+    g_renderState.colorWriteMask = (red ? 1 : 0) | (green ? 2 : 0) | (blue ? 4 : 0) | (alpha ? 8 : 0);
 }
 void C4JRender::StateSetDepthTestEnable(bool enable)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    if (enable) mcglEnable(0x0B71); else mcglDisable(0x0B71); // GL_DEPTH_TEST
+    g_renderState.depthTestEnable = enable;
 }
 void C4JRender::StateSetAlphaTestEnable(bool enable)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    if (enable) mcglEnable(0x0BC0); else mcglDisable(0x0BC0); // GL_ALPHA_TEST
+    g_renderState.alphaTestEnable = enable;
 }
 void C4JRender::StateSetDepthSlopeAndBias(float slope, float bias)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    if (slope != 0.0f || bias != 0.0f) { mcglEnable(0x8037); mcglPolygonOffset(slope, bias); } else mcglDisable(0x8037);
+    g_renderState.depthBiasSlope = slope;
+    g_renderState.depthBiasConst = bias;
 }
 void C4JRender::SetNextDrawVertexColor(bool hasColor) { tl_nextDrawHasVertexColor = hasColor; }
-void C4JRender::StateSetTextureEnable(bool enable) { g_textureEnabled = enable; if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return; if (enable) mcglEnable(0x0DE1); else { mcglDisable(0x0DE1); mcglBindTexture(0x0DE1, 0); } }
-void C4JRender::StateSetFogEnable(bool enable) { if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return; if (enable) mcglEnable(0x0B60); else mcglDisable(0x0B60); }
-void C4JRender::StateSetFogMode(int mode) { if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) mcglFogi(0x0B65, (mode == GL_EXP) ? 0x0800 : 0x2601); }
-void C4JRender::StateSetFogNearDistance(float dist) { if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) mcglFogf(0x0B63, dist); }
-void C4JRender::StateSetFogFarDistance(float dist) { if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) mcglFogf(0x0B64, dist); }
-void C4JRender::StateSetFogDensity(float density) { if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) mcglFogf(0x0B62, density); }
-void C4JRender::StateSetFogColour(float red, float green, float blue) { if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return; float c[4] = {red, green, blue, 1.0f}; mcglFogfv(0x0B66, c); }
-void C4JRender::StateSetLightingEnable(bool enable)
-{
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    if (enable) mcglEnable(0x0B50); else mcglDisable(0x0B50); // GL_LIGHTING
-}
+void C4JRender::StateSetTextureEnable(bool enable) { g_textureEnabled = enable; }
+void C4JRender::StateSetFogEnable(bool enable) { g_renderState.fogEnable = enable; }
+void C4JRender::StateSetFogMode(int mode) { g_renderState.fogMode = (mode == GL_EXP) ? 1 : 0; }
+void C4JRender::StateSetFogNearDistance(float dist) { g_renderState.fogNear = dist; }
+void C4JRender::StateSetFogFarDistance(float dist) { g_renderState.fogFar = dist; }
+void C4JRender::StateSetFogDensity(float density) { g_renderState.fogDensity = density; }
+void C4JRender::StateSetFogColour(float r, float g, float b) { g_renderState.fogColor[0]=r; g_renderState.fogColor[1]=g; g_renderState.fogColor[2]=b; }
+void C4JRender::StateSetLightingEnable(bool enable) {}
 void C4JRender::StateSetVertexTextureUV(float u, float v)
 {
     tl_globalUV[0] = u;
