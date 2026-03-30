@@ -741,11 +741,12 @@ static inline void wcscpy_s_impl(wchar_t* dst, size_t sz, const wchar_t* src) { 
 #define wcscpy_s(dst, sz, src) wcscpy_s_impl((dst), (sz), (src))
 #endif
 #ifndef strcpy_s
-static inline void strcpy_s_impl(char* dst, size_t sz, const char* src) { if (sz == 0) return; strncpy(dst, src, sz - 1); dst[sz - 1] = '\0'; }
+static inline int strcpy_s_impl(char* dst, size_t sz, const char* src) { if (sz == 0) return EINVAL; strncpy(dst, src, sz - 1); dst[sz - 1] = '\0'; return 0; }
 #define strcpy_s(dst, sz, src) strcpy_s_impl((dst), (sz), (src))
 #endif
 #ifndef strcat_s
-#define strcat_s(dst, sz, src) strncat((dst), (src), (sz) - strlen(dst) - 1)
+static inline int strcat_s_impl(char* dst, size_t sz, const char* src) { strncat(dst, src, sz - strlen(dst) - 1); return 0; }
+#define strcat_s(dst, sz, src) strcat_s_impl((dst), (sz), (src))
 #endif
 #ifndef wcscat_s
 #define wcscat_s(dst, sz, src) wcsncat((dst), (src), (sz) - wcslen(dst) - 1)
@@ -1633,11 +1634,17 @@ static inline XMVECTOR XMVectorSet(float x, float y, float z, float w) {
 #define ERROR_CANCELLED 1223
 #define _TRUNCATE ((size_t)-1)
 
-/* _vsnprintf_s: MSVC template overload deduces array size. Use C++ template on Linux too. */
-template<size_t N>
-static inline int _vsnprintf_s(char (&buffer)[N], size_t countOrTrunc, const char* format, va_list argptr) {
+/* _vsnprintf_s: MSVC template overload deduces array size. Use C++ template on Linux too.
+   On GCC, va_list is __va_list_tag[1]; "const va_list" decays to "const T*" which doesn't
+   match "T*". A templated VaList param handles both const and non-const va_list. */
+template<size_t N, typename VaList>
+static inline int _vsnprintf_s(char (&buffer)[N], size_t countOrTrunc, const char* format, VaList argptr) {
     size_t sz = (countOrTrunc == (size_t)-1) ? N : (countOrTrunc < N ? countOrTrunc : N);
-    return vsnprintf(buffer, sz, format, argptr);
+    va_list copy;
+    __builtin_va_copy(copy, argptr);
+    int r = vsnprintf(buffer, sz, format, copy);
+    __builtin_va_end(copy);
+    return r;
 }
 /* Fallback for pointer arguments (5-arg MSVC form) */
 static inline int _vsnprintf_s(char* buffer, size_t bufSize, size_t countOrTrunc, const char* format, va_list argptr) {
