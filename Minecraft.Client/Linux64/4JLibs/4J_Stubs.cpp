@@ -612,13 +612,18 @@ void C4JRender::UpdateGamma(unsigned short /*usGamma*/) {}
 void C4JRender::StartFrame()
 {
     if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    vkb_begin_frame();
+    if (!vkb_begin_frame())
+    {
+        // Swapchain out of date or minimized — skip this frame
+        g_vk.inRenderPass = false;
+    }
 }
 void C4JRender::Present()
 {
     if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread)
         return;
-    vkb_end_frame();
+    if (g_vk.inRenderPass)
+        vkb_end_frame();
 }
 void C4JRender::Clear(int flags, D3D11_RECT *pRect)
 {

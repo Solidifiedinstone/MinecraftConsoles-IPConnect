@@ -472,7 +472,12 @@ bool vkb_begin_frame()
 {
     int f = g_vk.currentFrame;
 
-    vkWaitForFences(g_vk.device, 1, &g_vk.inFlightFence[f], VK_TRUE, UINT64_MAX);
+    VkResult fenceResult = vkWaitForFences(g_vk.device, 1, &g_vk.inFlightFence[f], VK_TRUE, 1000000000ULL); // 1 second timeout
+    if (fenceResult == VK_TIMEOUT)
+    {
+        SessionLog_Printf("[vk] Fence timeout on frame %d\n", f);
+        return false;
+    }
 
     VkResult result = vkAcquireNextImageKHR(g_vk.device, g_vk.swapchain, UINT64_MAX,
         g_vk.imageAvailable[f], VK_NULL_HANDLE, &g_vk.imageIndex);
@@ -545,7 +550,11 @@ void vkb_end_frame()
     si.signalSemaphoreCount = 1;
     si.pSignalSemaphores    = &g_vk.renderFinished[f];
 
-    vkQueueSubmit(g_vk.graphicsQueue, 1, &si, g_vk.inFlightFence[f]);
+    VkResult submitResult = vkQueueSubmit(g_vk.graphicsQueue, 1, &si, g_vk.inFlightFence[f]);
+    if (submitResult != VK_SUCCESS)
+    {
+        SessionLog_Printf("[vk] vkQueueSubmit failed: %d\n", (int)submitResult);
+    }
 
     // Present
     VkPresentInfoKHR pi = { VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
