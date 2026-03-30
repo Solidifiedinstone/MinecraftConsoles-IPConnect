@@ -390,44 +390,33 @@ static void executeDraw(const DrawCall &call)
     mcglDisable(0x4001); // GL_LIGHT1
     mcglColor4ub(255, 255, 255, 255);
 
-    // Respect glDisable(GL_TEXTURE_2D) — don't re-enable textures from recorded draws.
-    if (g_textureEnabled)
+    int effectiveTextureId = call.textureId;
+    if (effectiveTextureId <= 0)
     {
-        int effectiveTextureId = call.textureId;
-        if (effectiveTextureId <= 0)
-        {
-            if (g_currentTexture > 0)
-                effectiveTextureId = g_currentTexture;
-            else if (tl_currentTexture > 0)
-                effectiveTextureId = tl_currentTexture;
-            else
-                effectiveTextureId = g_sharedTextureId.load(std::memory_order_relaxed);
-        }
+        if (g_currentTexture > 0)
+            effectiveTextureId = g_currentTexture;
+        else if (tl_currentTexture > 0)
+            effectiveTextureId = tl_currentTexture;
+        else
+            effectiveTextureId = g_sharedTextureId.load(std::memory_order_relaxed);
+    }
 
-        if (effectiveTextureId > 0)
+    if (g_textureEnabled && effectiveTextureId > 0)
+    {
+        auto it = g_textures.find(effectiveTextureId);
+        if (it != g_textures.end())
         {
-            auto it = g_textures.find(effectiveTextureId);
-            if (it != g_textures.end())
-            {
-                mcglEnable(0x0DE1); // GL_TEXTURE_2D
-                mcglBindTexture(0x0DE1, it->second.glId);
-            }
-            else
-            {
-                mcglDisable(0x0DE1); // GL_TEXTURE_2D
-                mcglBindTexture(0x0DE1, 0);
-            }
+            mcglEnable(0x0DE1); // GL_TEXTURE_2D
+            mcglBindTexture(0x0DE1, it->second.glId);
         }
         else
         {
             mcglDisable(0x0DE1); // GL_TEXTURE_2D
-            mcglBindTexture(0x0DE1, 0);
         }
     }
     else
     {
         mcglDisable(0x0DE1); // GL_TEXTURE_2D
-        mcglBindTexture(0x0DE1, 0);
     }
 
     if (call.hasMatrices)
@@ -869,8 +858,6 @@ void C4JRender::TextureBind(int idx)
     if (idx <= 0)
     {
         g_currentTexture = -1;
-        g_textureEnabled = false;
-        mcglDisable(0x0DE1); // GL_TEXTURE_2D
         mcglBindTexture(0x0DE1, 0);
         return;
     }
