@@ -30,6 +30,7 @@
 #include <GLFW/glfw3.h>
 #include "gl_api.h"
 #include "vk_backend.h"
+#include "vk_pipeline.h"
 #include "../SessionLog.h"
 
 /* ====================================================================
@@ -375,163 +376,175 @@ static void updateWindowSize()
     }
 }
 
+// Helper: multiply two column-major 4x4 matrices: out = a * b
+static void mat4Mul(float *out, const float *a, const float *b)
+{
+    for (int c = 0; c < 4; c++)
+        for (int r = 0; r < 4; r++)
+            out[c*4+r] = a[0*4+r]*b[c*4+0] + a[1*4+r]*b[c*4+1] + a[2*4+r]*b[c*4+2] + a[3*4+r]*b[c*4+3];
+}
+
+// Standard vertex layout for Vulkan (matches shader inputs at 32-byte stride)
+struct VkStdVertex { float x, y, z, u, v; uint32_t color; uint32_t _pad0, _pad1; };
+
 static void executeDraw(const DrawCall &call)
 {
     if (call.count <= 0 || call.bytes.empty())
         return;
+    if (!g_vk.inRenderPass)
+        return;
 
-    // Conservative fixed-function baseline for replayed world draws.
-    // Legacy state leakage here can cause missing faces / incorrect block colors.
-    mcglDisable(0x0B44); // GL_CULL_FACE
-    mcglFrontFace(0x0901); // GL_CCW
-    mcglDisable(0x0B50); // GL_LIGHTING
-    mcglDisable(0x4000); // GL_LIGHT0
-    mcglDisable(0x4001); // GL_LIGHT1
-    // Resolve which texture to use for this draw.
-    int effectiveTextureId = call.textureId;
-    if (effectiveTextureId <= 0)
-    {
-        if (g_currentTexture > 0)
-            effectiveTextureId = g_currentTexture;
-        else if (tl_currentTexture > 0)
-            effectiveTextureId = tl_currentTexture;
-        else
-            effectiveTextureId = g_sharedTextureId.load(std::memory_order_relaxed);
-    }
+    VkCommandBuffer cmd = vkb_cmd();
 
-    bool drawTextured = false;
-    if (effectiveTextureId > 0)
-    {
-        auto it = g_textures.find(effectiveTextureId);
-        if (it != g_textures.end())
-        {
-            mcglEnable(0x0DE1); // GL_TEXTURE_2D
-            mcglBindTexture(0x0DE1, it->second.glId);
-            drawTextured = true;
-        }
-    }
-    if (!drawTextured)
-    {
-        mcglDisable(0x0DE1); // GL_TEXTURE_2D
-    }
-
-    // Reset color to white for textured/vertex-colored draws.
-    // For untextured draws without per-vertex color (sky), preserve
-    // the current GL color state (set by glColor3f before glCallList).
-    if (call.useVertexColor || drawTextured)
-        mcglColor4ub(255, 255, 255, 255);
-
+    // ── Compute MVP ──
+    ensureSoftMatrices();
+    float mvp[16];
+    float mv[16];
     if (call.hasMatrices)
     {
-        mcglMatrixMode(0x1700); // GL_MODELVIEW
-        mcglPushMatrix();
-        // Display-list style replay should preserve the caller's live camera/projection state.
-        // Apply recorded list-local transform on top of current modelview instead of replacing it.
-        mcglMultMatrixf(call.modelview);
+        // Display list replay: live modelview * recorded modelview
+        mat4Mul(mv, tl_softMatrices.model, call.modelview);
     }
+    else
+    {
+        memcpy(mv, tl_softMatrices.model, sizeof(mv));
+    }
+    mat4Mul(mvp, tl_softMatrices.proj, mv);
 
-    // Avoid leaked texture-matrix state flattening/distorting UVs during replay.
-    mcglMatrixMode(0x1702); // GL_TEXTURE
-    mcglPushMatrix();
-    mcglLoadIdentity();
-    mcglMatrixMode(0x1700); // GL_MODELVIEW
+    // ── Push constants ──
+    VkPushConstants pc = {};
+    memcpy(pc.mvp, mvp, 64);
+    pc.globalColor[0] = pc.globalColor[1] = pc.globalColor[2] = pc.globalColor[3] = 1.0f;
+    pc.textureEnable  = 0.0f; // TODO: Phase 4 textures
+    pc.fogEnable      = 0.0f; // TODO: Phase 5 fog
+    pc.alphaTestEnable = 0.0f;
+    pc.alphaRef       = 0.1f;
 
+    // ── Expand vertices ──
     const bool isQuadList = (call.primitive == C4JRender::PRIMITIVE_TYPE_QUAD_LIST);
-    mcglBegin(isQuadList ? 0x0004 : mapPrimitive(call.primitive)); // GL_TRIANGLES for quads
-    if (call.vtype == C4JRender::VERTEX_TYPE_COMPRESSED)
+    const bool isCompressed = (call.vtype == C4JRender::VERTEX_TYPE_COMPRESSED);
+
+    // Calculate output vertex count
+    int outCount = call.count;
+    if (isQuadList)
+        outCount = (call.count / 4) * 6; // 4 verts per quad → 6 verts (2 triangles)
+
+    size_t outBytes = (size_t)outCount * 32;
+
+    // Check staging buffer space
+    VkDeviceSize alignedOffset = (g_vk.stagingOffset + 3) & ~(VkDeviceSize)3;
+    if (alignedOffset + outBytes > VKB_STAGING_BUFFER_SIZE)
+        return; // staging full, skip this draw
+
+    uint8_t *dst = (uint8_t*)g_vk.stagingMapped[g_vk.currentFrame] + alignedOffset;
+
+    // Write vertices to staging buffer
+    auto writeStdVert = [](uint8_t *d, float x, float y, float z, float u, float v, uint32_t col) {
+        float *f = (float*)d;
+        f[0] = x; f[1] = y; f[2] = z; f[3] = u; f[4] = v;
+        ((uint32_t*)d)[5] = col;
+        ((uint32_t*)d)[6] = 0;
+        ((uint32_t*)d)[7] = 0;
+    };
+
+    if (isCompressed)
     {
         const int16_t *v = reinterpret_cast<const int16_t *>(call.bytes.data());
-        auto emitCompVertex = [&](int i)
-        {
+        auto decodeVert = [&](int i, float &ox, float &oy, float &oz, float &ou, float &ov, uint32_t &oc) {
             const int16_t *s = v + (i * 8);
-            const float x = (float)s[0] / 1024.0f;
-            const float y = (float)s[1] / 1024.0f;
-            const float z = (float)s[2] / 1024.0f;
-            const float u = (float)s[4] / 8192.0f;
-            const float t = (float)s[5] / 8192.0f;
-            const unsigned short packed = (unsigned short)(((int)s[3] + 32768) & 0xFFFF);
-
-            if (call.useVertexColor)
-            {
-                unsigned char r = 255, g = 255, b = 255;
-                decode565(packed, r, g, b);
-                mcglColor4ub(r, g, b, 255);
-            }
-            mcglTexCoord2f(u, t);
-            mcglVertex3f(x, y, z);
+            ox = (float)s[0] / 1024.0f;
+            oy = (float)s[1] / 1024.0f;
+            oz = (float)s[2] / 1024.0f;
+            ou = (float)s[4] / 8192.0f;
+            ov = (float)s[5] / 8192.0f;
+            unsigned short packed = (unsigned short)(((int)s[3] + 32768) & 0xFFFF);
+            unsigned char r, g, b;
+            decode565(packed, r, g, b);
+            oc = ((uint32_t)r << 24) | ((uint32_t)g << 16) | ((uint32_t)b << 8) | 0xFF;
         };
 
+        uint8_t *p = dst;
         if (isQuadList)
         {
             for (int i = 0; i + 3 < call.count; i += 4)
             {
-                emitCompVertex(i + 0);
-                emitCompVertex(i + 1);
-                emitCompVertex(i + 2);
-                emitCompVertex(i + 0);
-                emitCompVertex(i + 2);
-                emitCompVertex(i + 3);
+                float x[4], y[4], z[4], u[4], vv[4]; uint32_t c[4];
+                for (int j = 0; j < 4; j++) decodeVert(i+j, x[j], y[j], z[j], u[j], vv[j], c[j]);
+                int idx[] = {0,1,2, 0,2,3};
+                for (int j = 0; j < 6; j++) {
+                    int k = idx[j];
+                    writeStdVert(p, x[k], y[k], z[k], u[k], vv[k], c[k]);
+                    p += 32;
+                }
             }
         }
         else
         {
-            for (int i = 0; i < call.count; ++i)
-                emitCompVertex(i);
+            for (int i = 0; i < call.count; i++) {
+                float x, y, z, u, vv; uint32_t c;
+                decodeVert(i, x, y, z, u, vv, c);
+                writeStdVert(p, x, y, z, u, vv, c);
+                p += 32;
+            }
         }
     }
     else
     {
-        const uint32_t *v = reinterpret_cast<const uint32_t *>(call.bytes.data());
-        auto emitStdVertex = [&](int i)
-        {
-            const uint32_t *s = v + (i * 8);
-            const float x = *reinterpret_cast<const float *>(&s[0]);
-            const float y = *reinterpret_cast<const float *>(&s[1]);
-            const float z = *reinterpret_cast<const float *>(&s[2]);
-            float u = *reinterpret_cast<const float *>(&s[3]);
-            float t = *reinterpret_cast<const float *>(&s[4]);
-            if (call.useVertexColor)
-            {
-                const uint32_t c = s[5];
-                // Tesselator packs color as 0xRRGGBBAA.
-                mcglColor4ub((c >> 24) & 0xFF,
-                             (c >> 16) & 0xFF,
-                             (c >> 8) & 0xFF,
-                             c & 0xFF);
-            }
-            mcglTexCoord2f(u, t);
-            mcglVertex3f(x, y, z);
-        };
-
+        // Standard format: already 32 bytes per vertex, just handle quad expansion
+        const uint8_t *src = call.bytes.data();
         if (isQuadList)
         {
+            uint8_t *p = dst;
             for (int i = 0; i + 3 < call.count; i += 4)
             {
-                emitStdVertex(i + 0);
-                emitStdVertex(i + 1);
-                emitStdVertex(i + 2);
-                emitStdVertex(i + 0);
-                emitStdVertex(i + 2);
-                emitStdVertex(i + 3);
+                int idx[] = {0,1,2, 0,2,3};
+                for (int j = 0; j < 6; j++) {
+                    memcpy(p, src + (i + idx[j]) * 32, 32);
+                    p += 32;
+                }
             }
         }
         else
         {
-            for (int i = 0; i < call.count; ++i)
-                emitStdVertex(i);
+            memcpy(dst, src, (size_t)call.count * 32);
         }
     }
-    mcglEnd();
 
-    mcglMatrixMode(0x1702); // GL_TEXTURE
-    mcglPopMatrix();
-    mcglMatrixMode(0x1700); // GL_MODELVIEW
-
-    if (call.hasMatrices)
+    // If no per-vertex color, bake white (0xFFFFFFFF) into color slot
+    if (!call.useVertexColor)
     {
-        mcglPopMatrix();            // modelview
-        mcglMatrixMode(0x1700);     // GL_MODELVIEW
+        uint32_t white = 0xFFFFFFFF;
+        for (int i = 0; i < outCount; i++)
+            memcpy(dst + i * 32 + 20, &white, 4);
     }
+
+    // ── Bind pipeline ──
+    VkPipelineKey key = vkp_default_key();
+    // TODO Phase 5: set key.blendEnable, srcBlend, dstBlend from render state
+    if (call.primitive == C4JRender::PRIMITIVE_TYPE_LINE_LIST)
+        key.topology = 1;
+    else if (call.primitive == C4JRender::PRIMITIVE_TYPE_LINE_STRIP)
+        key.topology = 2;
+
+    VkPipeline pipeline = vkp_get_pipeline(key);
+    if (!pipeline) return;
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+    vkCmdPushConstants(cmd, g_pipe.pipelineLayout,
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        0, sizeof(VkPushConstants), &pc);
+
+    // Bind white fallback texture (Phase 4 will bind real textures)
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+        g_pipe.pipelineLayout, 0, 1, &g_pipe.whiteTexDescSet, 0, nullptr);
+
+    // ── Bind vertex buffer and draw ──
+    VkBuffer vb = g_vk.stagingBuffer[g_vk.currentFrame];
+    VkDeviceSize offset = alignedOffset;
+    vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &offset);
+    vkCmdDraw(cmd, (uint32_t)outCount, 1, 0, 0);
+
+    g_vk.stagingOffset = alignedOffset + outBytes;
 }
 
 } // namespace

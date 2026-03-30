@@ -59,6 +59,7 @@ if(UNIX AND NOT APPLE)
     "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Linux64/4JLibs/4J_Stubs.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Linux64/4JLibs/gl_api.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Linux64/4JLibs/vk_backend.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Linux64/4JLibs/vk_pipeline.cpp"
     # SentientManager stubs already in Extrax64Stubs.cpp
     # DynamicConfigurations stubs already in Extrax64Stubs.cpp
     # SocialManager stubs already in Extrax64Stubs.cpp

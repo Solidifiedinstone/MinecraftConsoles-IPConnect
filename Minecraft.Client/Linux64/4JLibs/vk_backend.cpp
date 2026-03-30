@@ -9,6 +9,7 @@
 #define VMA_VULKAN_VERSION 1000000
 #define VMA_IMPLEMENTATION
 #include "vk_backend.h"
+#include "vk_pipeline.h"
 #include "../SessionLog.h"
 
 #include <cstring>
@@ -393,6 +394,13 @@ bool vkb_init(GLFWwindow* window)
         g_vk.stagingMapped[i] = info.pMappedData;
     }
 
+    // Initialize pipeline (shaders, layout, descriptors)
+    if (!vkp_init())
+    {
+        SessionLog_Printf("[vk] Pipeline init failed\n");
+        return false;
+    }
+
     SessionLog_Printf("[vk] Vulkan backend initialized\n");
     return true;
 }
@@ -402,6 +410,7 @@ void vkb_cleanup()
 {
     if (!g_vk.device) return;
     vkDeviceWaitIdle(g_vk.device);
+    vkp_cleanup();
 
     for (int i = 0; i < VKB_MAX_FRAMES_IN_FLIGHT; i++)
     {
