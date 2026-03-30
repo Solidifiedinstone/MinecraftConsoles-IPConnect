@@ -1015,6 +1015,9 @@ static inline BOOL VirtualFree(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType
 #define CREATE_ALWAYS 2
 #define FILE_ATTRIBUTE_NORMAL 0x80
 #define FILE_FLAG_RANDOM_ACCESS 0x10000000
+#define FILE_SHARE_READ   0x00000001
+#define FILE_SHARE_WRITE  0x00000002
+#define CP_UTF8           65001
 #define FILE_BEGIN 0
 #define FILE_CURRENT 1
 #define FILE_END 2
@@ -1036,6 +1039,25 @@ static inline HANDLE CreateFile(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD 
     h->magic = _LINUX_FILE_HANDLE_MAGIC;
     h->fp    = f;
     return (HANDLE)h;
+}
+
+static inline HANDLE CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,
+    void* lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile) {
+    char buf[MAX_PATH];
+    wcstombs(buf, lpFileName, MAX_PATH);
+    return CreateFile(buf, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
+}
+
+static inline int MultiByteToWideChar(unsigned int CodePage, DWORD dwFlags, const char* lpMultiByteStr,
+    int cbMultiByte, wchar_t* lpWideCharStr, int cchWideChar) {
+    (void)CodePage; (void)dwFlags;
+    if (cbMultiByte == -1) cbMultiByte = strlen(lpMultiByteStr) + 1;
+    if (cchWideChar == 0) return (int)mbstowcs(NULL, lpMultiByteStr, 0) + 1;
+    return (int)mbstowcs(lpWideCharStr, lpMultiByteStr, cchWideChar);
+}
+
+static inline int _wtoi(const wchar_t* str) {
+    return (int)wcstol(str, NULL, 10);
 }
 
 static inline BOOL ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead, LPDWORD lpNumberOfBytesRead, void* lpOverlapped) {
