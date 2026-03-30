@@ -47,4 +47,5 @@ void mcglLightfv(unsigned int light, unsigned int pname, const float *params) { 
 void mcglLightModelfv(unsigned int pname, const float *params) { glLightModelfv(pname, params); }
 void mcglShadeModel(unsigned int mode) { glShadeModel(mode); }
 unsigned int mcglGetError() { return glGetError(); }
+void mcglTexEnvi(unsigned int target, unsigned int pname, int param) { glTexEnvi(target, pname, param); }
 void mcglGetIntegerv(unsigned int pname, int *params) { glGetIntegerv(pname, params); }

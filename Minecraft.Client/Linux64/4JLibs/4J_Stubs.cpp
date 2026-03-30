@@ -891,13 +891,13 @@ void C4JRender::TextureData(int width, int height, void *data, int level, eTextu
     if (g_currentTexture <= 0 || !data || width <= 0 || height <= 0) return;
     // Pixels are 32-bit ARGB ints (0xAARRGGBB). On little-endian, memory order is BB GG RR AA.
     // GL_BGRA + GL_UNSIGNED_BYTE reads bytes as B G R A which maps correctly.
-    mcglTexImage2D(0x0DE1, level, 0x1908, width, height, 0, 0x80E1, 0x1401, data); // internal=GL_RGBA, format=GL_BGRA, type=GL_UNSIGNED_BYTE
+    mcglTexImage2D(0x0DE1, level, 0x1908, width, height, 0, 0x80E1, 0x1401, data); // GL_BGRA
 }
 void C4JRender::TextureDataUpdate(int xoffset, int yoffset, int width, int height, void *data, int level)
 {
     if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
     if (g_currentTexture <= 0 || !data || width <= 0 || height <= 0) return;
-    mcglTexSubImage2D(0x0DE1, level, xoffset, yoffset, width, height, 0x80E1, 0x1401, data); // GL_BGRA
+    mcglTexSubImage2D(0x0DE1, level, xoffset, yoffset, width, height, 0x80E1, 0x1401, data);
 }
 void C4JRender::TextureSetParam(int param, int value)
 {
