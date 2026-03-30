@@ -104,7 +104,8 @@ void TntTile::entityInside(Level *level, int x, int y, int z, shared_ptr<Entity>
 		if (entity->isOnFire())
 		{
 			shared_ptr<Arrow> arrow = dynamic_pointer_cast<Arrow>(entity);
-			destroy(level, x, y, z, EXPLODE_BIT, arrow->owner->instanceof(eTYPE_LIVINGENTITY) ? dynamic_pointer_cast<LivingEntity>(arrow->owner) : nullptr);
+			shared_ptr<LivingEntity> attacker = (arrow && arrow->owner && arrow->owner->instanceof(eTYPE_LIVINGENTITY)) ? dynamic_pointer_cast<LivingEntity>(arrow->owner) : nullptr;
+			destroy(level, x, y, z, EXPLODE_BIT, attacker);
 			level->removeTile(x, y, z);
 		}
 	}

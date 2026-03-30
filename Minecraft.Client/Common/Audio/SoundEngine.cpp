@@ -1,20 +1,24 @@
 ﻿#include "stdafx.h"
 
 #include "SoundEngine.h"
-#include "..\Consoles_App.h"
-#include "..\..\MultiplayerLocalPlayer.h"
-#include "..\..\..\Minecraft.World\net.minecraft.world.level.h"
-#include "..\..\Minecraft.World\leveldata.h"
-#include "..\..\Minecraft.World\mth.h"
-#include "..\..\TexturePackRepository.h"
-#include "..\..\DLCTexturePack.h"
-#include "Common\DLC\DLCAudioFile.h"
+#include "../Consoles_App.h"
+#include "../../MultiPlayerLocalPlayer.h"
+#include "../../../Minecraft.World/net.minecraft.world.level.h"
+#include "../../Minecraft.World/LevelData.h"
+#include "../../Minecraft.World/Mth.h"
+#include "../../TexturePackRepository.h"
+#include "../../DLCTexturePack.h"
+#include "Common/DLC/DLCAudioFile.h"
 
 #ifdef __PSVITA__
 #include <audioout.h>
 #endif
 
-#include "..\..\Minecraft.Client\Windows64\Windows64_App.h"
+#ifdef _LINUX64
+#include "../../Linux64/Linux64_App.h"
+#elif defined _WINDOWS64
+#include "../../Windows64/Windows64_App.h"
+#endif
 
 #include "stb_vorbis.h"
 
@@ -25,7 +29,7 @@
 #include <vector>
 #include <memory>
 #include <mutex>
-#include "..\Filesystem\Filesystem.h"
+#include "../Filesystem/Filesystem.h"
 
 #ifdef __ORBIS__
 #include <audioout.h>
@@ -46,7 +50,7 @@ void SoundEngine::tick(shared_ptr<Mob> *players, float a)
 void SoundEngine::destroy() {}
 void SoundEngine::play(int iSound, float x, float y, float z, float volume, float pitch)
 {
-	app.DebugPrintf("PlaySound - %d\n",iSound);
+	app.DebugPrintf("PlaySound - %d/n",iSound);
 }
 void SoundEngine::playStreaming(const wstring& name, float x, float y , float z, float volume, float pitch, bool bMusicDelay) {}
 void SoundEngine::playUI(int iSound, float volume, float pitch) {}
@@ -64,12 +68,12 @@ void SoundEngine::playMusicTick() {};
 #else
 
 #ifdef _WINDOWS64
-char SoundEngine::m_szSoundPath[]={"Windows64Media\\Sound\\"};
-char SoundEngine::m_szMusicPath[]={"music\\"};
+char SoundEngine::m_szSoundPath[]={"Windows64Media//Sound//"};
+char SoundEngine::m_szMusicPath[]={"music//"};
 char SoundEngine::m_szRedistName[]={"redist64"};
 #elif defined _DURANGO
-char SoundEngine::m_szSoundPath[]={"Sound\\"};
-char SoundEngine::m_szMusicPath[]={"music\\"};
+char SoundEngine::m_szSoundPath[]={"Sound//"};
+char SoundEngine::m_szMusicPath[]={"music//"};
 char SoundEngine::m_szRedistName[]={"redist64"};
 #elif defined __ORBIS__
 
@@ -166,14 +170,14 @@ std::vector<MiniAudioSound*> m_activeSounds;
 /////////////////////////////////////////////
 void SoundEngine::init(Options* pOptions)
 {
-    app.DebugPrintf("---SoundEngine::init\n");
+    app.DebugPrintf("---SoundEngine::init/n");
 
     m_engineConfig = ma_engine_config_init();
     m_engineConfig.listenerCount = MAX_LOCAL_PLAYERS;
 
     if (ma_engine_init(&m_engineConfig, &m_engine) != MA_SUCCESS)
     {
-        app.DebugPrintf("Failed to initialize miniaudio engine\n");
+        app.DebugPrintf("Failed to initialize miniaudio engine/n");
         return;
     }
 
@@ -186,7 +190,7 @@ void SoundEngine::init(Options* pOptions)
     
     m_bSystemMusicPlaying = false;
 
-    app.DebugPrintf("---miniaudio initialized\n");
+    app.DebugPrintf("---miniaudio initialized/n");
 	
     return;
 }
@@ -449,7 +453,7 @@ void SoundEngine::play(int iSound, float x, float y, float z, float volume, floa
 
     if (iSound == -1)
     {
-        app.DebugPrintf(6, "PlaySound with sound of -1 !!!!!!!!!!!!!!!\n");
+        app.DebugPrintf(6, "PlaySound with sound of -1 !!!!!!!!!!!!!!!/n");
         return;
     }
 
@@ -461,7 +465,7 @@ void SoundEngine::play(int iSound, float x, float y, float z, float volume, floa
     strcat((char*)szSoundName, SoundName);
 
     app.DebugPrintf(6,
-        "PlaySound - %d - %s - %s (%f %f %f, vol %f, pitch %f)\n",
+        "PlaySound - %d - %s - %s (%f %f %f, vol %f, pitch %f)/n",
         iSound, SoundName, szSoundName, x, y, z, volume, pitch);
 
     char basePath[256];
@@ -551,7 +555,7 @@ void SoundEngine::play(int iSound, float x, float y, float z, float volume, floa
             NULL,
             &s->sound) != MA_SUCCESS)
     {
-        app.DebugPrintf("Failed to initialize sound from file: %s\n", finalPath);
+        app.DebugPrintf("Failed to initialize sound from file: %s/n", finalPath);
         delete s;
         return;
     }
@@ -615,7 +619,7 @@ void SoundEngine::playUI(int iSound, float volume, float pitch)
 	}
 	if (!found)
 	{
-		app.DebugPrintf("No sound file found for UI sound: %s\n", basePath);
+		app.DebugPrintf("No sound file found for UI sound: %s/n", basePath);
 		return;
 	}
 
@@ -636,7 +640,7 @@ void SoundEngine::playUI(int iSound, float volume, float pitch)
             &s->sound) != MA_SUCCESS)
     {
         delete s;
-        app.DebugPrintf("ma_sound_init_from_file failed: %s\n", finalPath);
+        app.DebugPrintf("ma_sound_init_from_file failed: %s/n", finalPath);
         return;
     }
 
@@ -645,7 +649,7 @@ void SoundEngine::playUI(int iSound, float volume, float pitch)
     float finalVolume = volume * m_MasterEffectsVolume;
     if (finalVolume > 1.0f)
         finalVolume = 1.0f;
-	printf("UI Sound volume set to %f\nEffects volume: %f\n", finalVolume, m_MasterEffectsVolume);
+	printf("UI Sound volume set to %f/nEffects volume: %f/n", finalVolume, m_MasterEffectsVolume);
 
     ma_sound_set_volume(&s->sound, finalVolume);
     ma_sound_set_pitch(&s->sound, pitch);
@@ -747,14 +751,14 @@ int SoundEngine::GetRandomishTrack(int iStart,int iEnd)
 		if(m_bHeardTrackA[i]==false) 
 		{
 			bAllTracksHeard=false;
-			app.DebugPrintf("Not heard all tracks yet\n");
+			app.DebugPrintf("Not heard all tracks yet/n");
 			break;
 		}
 	}
 
 	if(bAllTracksHeard)
 	{
-		app.DebugPrintf("Heard all tracks - resetting the tracking array\n");
+		app.DebugPrintf("Heard all tracks - resetting the tracking array/n");
 
 		for(size_t i=iStart;i<=iEnd;i++)
 		{
@@ -770,17 +774,17 @@ int SoundEngine::GetRandomishTrack(int iStart,int iEnd)
 		if(m_bHeardTrackA[iVal]==false)
 		{
 			// not heard this
-			app.DebugPrintf("(%d) Not heard track %d yet, so playing it now\n",i,iVal);
+			app.DebugPrintf("(%d) Not heard track %d yet, so playing it now/n",i,iVal);
 			m_bHeardTrackA[iVal]=true;
 			break;
 		}
 		else
 		{
-			app.DebugPrintf("(%d) Skipping track %d already heard it recently\n",i,iVal);
+			app.DebugPrintf("(%d) Skipping track %d already heard it recently/n",i,iVal);
 		}
 	}
 
-	app.DebugPrintf("Select track %d\n",iVal);
+	app.DebugPrintf("Select track %d/n",iVal);
 	return iVal;
 }
 /////////////////////////////////////////////
@@ -933,7 +937,7 @@ int SoundEngine::OpenStreamThreadProc(void* lpParameter)
 
     if (result != MA_SUCCESS)
     {
-		app.DebugPrintf("SoundEngine::OpenStreamThreadProc - Failed to open stream: %s\n", soundEngine->m_szStreamName);
+		app.DebugPrintf("SoundEngine::OpenStreamThreadProc - Failed to open stream: %s/n", soundEngine->m_szStreamName);
         return 0;
     }
 
@@ -977,7 +981,7 @@ void SoundEngine::playMusicUpdate()
 
 		if (m_musicStreamActive)
 		{
-			app.DebugPrintf("WARNING: m_musicStreamActive already true in Idle state, resetting to Playing\n");
+			app.DebugPrintf("WARNING: m_musicStreamActive already true in Idle state, resetting to Playing/n");
 			m_StreamState = eMusicStreamState_Playing;
 			return;
 		}
@@ -1017,7 +1021,7 @@ void SoundEngine::playMusicUpdate()
 				DLCPack *pack = pDLCTexPack->getDLCInfoParentPack();
 				DLCAudioFile *dlcAudioFile = (DLCAudioFile *) pack->getFile(DLCManager::e_DLCType_Audio, 0);
 
-				app.DebugPrintf("Mashup pack \n");
+				app.DebugPrintf("Mashup pack /n");
 
 				// build the name
 
@@ -1031,7 +1035,7 @@ void SoundEngine::playMusicUpdate()
 				
 #ifdef _XBOX_ONE
 					wstring &wstrSoundName=dlcAudioFile->GetSoundName(m_musicID);
-					wstring wstrFile=L"TPACK:\\Data\\" + wstrSoundName +L".wav";
+					wstring wstrFile=L"TPACK://Data//" + wstrSoundName +L".wav";
 					std::wstring mountedPath = StorageManager.GetMountedPath(wstrFile);
 					wcstombs(m_szStreamName,mountedPath.c_str(),255);
 #else
@@ -1042,7 +1046,7 @@ void SoundEngine::playMusicUpdate()
 #if defined __PS3__ || defined __ORBIS__ || defined __PSVITA__
 					string strFile="TPACK:/Data/" + string(szName) + ".wav";
 #else
-					string strFile="TPACK:\\Data\\" + string(szName) + ".wav";
+					string strFile="TPACK://Data//" + string(szName) + ".wav";
 #endif
 					std::string mountedPath = StorageManager.GetMountedPath(strFile);
 					strcpy(m_szStreamName,mountedPath.c_str());
@@ -1170,12 +1174,12 @@ void SoundEngine::playMusicUpdate()
 					{
 						strcpy_s(dotPos, 5, ".wav");
 					}
-					app.DebugPrintf("WARNING: No audio file found for music ID %d (tried .ogg, .mp3, .wav)\n", m_musicID);
+					app.DebugPrintf("WARNING: No audio file found for music ID %d (tried .ogg, .mp3, .wav)/n", m_musicID);
 					return;
 				}
 			}
 
-			app.DebugPrintf("Starting streaming - %s\n",m_szStreamName);
+			app.DebugPrintf("Starting streaming - %s/n",m_szStreamName);
 			m_openStreamThread = new C4JThread(OpenStreamThreadProc, this, "OpenStreamThreadProc");
 			m_openStreamThread->Run();
 			m_StreamState = eMusicStreamState_Opening;
@@ -1188,7 +1192,7 @@ void SoundEngine::playMusicUpdate()
 			delete m_openStreamThread;
 			m_openStreamThread = NULL;
 
-			app.DebugPrintf("OpenStreamThreadProc finished. m_musicStreamActive=%d\n", m_musicStreamActive);
+			app.DebugPrintf("OpenStreamThreadProc finished. m_musicStreamActive=%d/n", m_musicStreamActive);
 
 			if (!m_musicStreamActive)
 			{
@@ -1234,7 +1238,7 @@ void SoundEngine::playMusicUpdate()
 
 			ma_sound_set_volume(&m_musicStream, finalVolume);
 			ma_result startResult = ma_sound_start(&m_musicStream);
-			app.DebugPrintf("ma_sound_start result: %d\n", startResult);
+			app.DebugPrintf("ma_sound_start result: %d/n", startResult);
 
 			m_StreamState=eMusicStreamState_Playing;
 		}

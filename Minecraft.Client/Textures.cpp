@@ -3,21 +3,21 @@
 #include "TexturePackRepository.h"
 #include "HttpTexture.h"
 #include "MemTexture.h"
-#include "..\Minecraft.World\InputStream.h"
-#include "..\Minecraft.World\IntBuffer.h"
-#include "..\Minecraft.World\ByteBuffer.h"
+#include "../Minecraft.World/InputStream.h"
+#include "../Minecraft.World/IntBuffer.h"
+#include "../Minecraft.World/ByteBuffer.h"
 #include "TexturePack.h"
 #include "Options.h"
-#include "..\Minecraft.Client\MemTextureProcessor.h"
+#include "../Minecraft.Client/MemTextureProcessor.h"
 #include "MobSkinMemTextureProcessor.h"
 #include "PreStitchedTextureMap.h"
 #include "StitchedTexture.h"
 #include "Texture.h"
-#include "..\Minecraft.World\net.minecraft.world.h"
-#include "..\Minecraft.World\net.minecraft.world.level.h"
-#include "..\Minecraft.World\StringHelpers.h"
+#include "../Minecraft.World/net.minecraft.world.h"
+#include "../Minecraft.World/net.minecraft.world.level.h"
+#include "../Minecraft.World/StringHelpers.h"
 #include "ResourceLocation.h"
-#include "..\Minecraft.World\ItemEntity.h"
+#include "../Minecraft.World/ItemEntity.h"
 #include "TextureAtlas.h"
 
 bool Textures::MIPMAP = true;
@@ -952,11 +952,33 @@ void Textures::replaceTextureDirect(intArray rawPixels, int w, int h, int id)
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
+	// Input pixels are ARGB ints; convert to packed RGBA bytes before upload.
+	byteArray newPixels(w * h * 4);
+	for (unsigned int i = 0; i < rawPixels.length; i++)
+	{
+		int a = (rawPixels[i] >> 24) & 0xff;
+		int r = (rawPixels[i] >> 16) & 0xff;
+		int g = (rawPixels[i] >> 8) & 0xff;
+		int b = (rawPixels[i]) & 0xff;
+
+		newPixels[i * 4 + 0] = (byte)r;
+		newPixels[i * 4 + 1] = (byte)g;
+		newPixels[i * 4 + 2] = (byte)b;
+		newPixels[i * 4 + 3] = (byte)a;
+	}
+
+	ByteBuffer *pixels = MemoryTracker::createByteBuffer(w * h * 4);
+	pixels->clear();
+	pixels->put(newPixels);
+	pixels->position(0)->limit(newPixels.length);
+	delete[] newPixels.data;
+
 #ifdef _XBOX
-	RenderManager.TextureDataUpdate(rawPixels.data, 0);
+	RenderManager.TextureDataUpdate(pixels->getBuffer(), 0);
 #else
-	RenderManager.TextureDataUpdate(0, 0, w, h, rawPixels.data, 0);
+	RenderManager.TextureDataUpdate(0, 0, w, h, pixels->getBuffer(), 0);
 #endif
+	delete pixels;
 }
 
 // 4J - added. This is a more minimal version of replaceTexture that assumes the texture bytes are already in order, and so doesn't do any of the extra copying round
@@ -1611,4 +1633,3 @@ bool Textures::IsOriginalImage(TEXTURE_NAME texId, const wstring& name)
 	}
 	return false;
 }
-

@@ -2,16 +2,16 @@
 #include "ServerChunkCache.h"
 #include "ServerLevel.h"
 #include "MinecraftServer.h"
-#include "..\Minecraft.World\net.minecraft.world.level.h"
-#include "..\Minecraft.World\net.minecraft.world.level.dimension.h"
-#include "..\Minecraft.World\net.minecraft.world.level.storage.h"
-#include "..\Minecraft.World\net.minecraft.world.level.chunk.h"
-#include "..\Minecraft.World\Pos.h"
-#include "..\Minecraft.World\ProgressListener.h"
-#include "..\Minecraft.World\ThreadName.h"
-#include "..\Minecraft.World\compression.h"
-#include "..\Minecraft.World\OldChunkStorage.h"
-#include "..\Minecraft.World\Tile.h"
+#include "../Minecraft.World/net.minecraft.world.level.h"
+#include "../Minecraft.World/net.minecraft.world.level.dimension.h"
+#include "../Minecraft.World/net.minecraft.world.level.storage.h"
+#include "../Minecraft.World/net.minecraft.world.level.chunk.h"
+#include "../Minecraft.World/Pos.h"
+#include "../Minecraft.World/ProgressListener.h"
+#include "../Minecraft.World/ThreadName.h"
+#include "../Minecraft.World/compression.h"
+#include "../Minecraft.World/OldChunkStorage.h"
+#include "../Minecraft.World/Tile.h"
 
 ServerChunkCache::ServerChunkCache(ServerLevel *level, ChunkStorage *storage, ChunkSource *source)
 {
@@ -43,7 +43,7 @@ ServerChunkCache::~ServerChunkCache()
 {
 	storage->WaitForAll();		// MGH -  added to fix crash bug 175183
 	delete emptyChunk;
-	delete cache;
+	delete[] cache;
 	delete source;
 
 #ifdef _LARGE_WORLDS
@@ -51,7 +51,7 @@ ServerChunkCache::~ServerChunkCache()
 	{
 		delete m_unloadedCache[i];
 	}
-	delete m_unloadedCache;
+	delete[] m_unloadedCache;
 #endif
 
 	for (auto& it : m_loadedChunkList)

@@ -79,7 +79,7 @@ bool FileTexturePack::isTerrainUpdateCompatible()
 		}
 	} catch (Exception ignored) {
 	}
-	boolean hasOldFiles = hasFile("terrain.png") || hasFile("gui/items.png");
+	bool hasOldFiles = hasFile("terrain.png") || hasFile("gui/items.png");
 	return !hasOldFiles;
 #endif
 	return false;

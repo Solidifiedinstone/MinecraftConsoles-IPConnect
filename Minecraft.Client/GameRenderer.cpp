@@ -13,39 +13,39 @@
 #include "CreativeMode.h"
 #include "Lighting.h"
 #include "Options.h"
-#include "MultiplayerLocalPlayer.h"
+#include "MultiPlayerLocalPlayer.h"
 #include "GuiParticles.h"
 #include "MultiPlayerLevel.h"
 #include "Chunk.h"
-#include "..\Minecraft.World\net.minecraft.world.entity.h"
-#include "..\Minecraft.World\net.minecraft.world.entity.player.h"
-#include "..\Minecraft.World\net.minecraft.world.item.enchantment.h"
-#include "..\Minecraft.World\net.minecraft.world.level.h"
-#include "..\Minecraft.World\net.minecraft.world.level.material.h"
-#include "..\Minecraft.World\net.minecraft.world.level.tile.h"
-#include "..\Minecraft.World\net.minecraft.world.level.chunk.h"
-#include "..\Minecraft.World\net.minecraft.world.level.biome.h"
-#include "..\Minecraft.World\net.minecraft.world.level.dimension.h"
-#include "..\Minecraft.World\net.minecraft.world.phys.h"
-#include "..\Minecraft.World\System.h"
-#include "..\Minecraft.World\FloatBuffer.h"
-#include "..\Minecraft.World\ThreadName.h"
-#include "..\Minecraft.World\SparseLightStorage.h"
-#include "..\Minecraft.World\CompressedTileStorage.h"
-#include "..\Minecraft.World\SparseDataStorage.h"
-#include "..\Minecraft.World\JavaMath.h"
-#include "..\Minecraft.World\Facing.h"
-#include "..\Minecraft.World\MobEffect.h"
-#include "..\Minecraft.World\IntCache.h"
-#include "..\Minecraft.World\SmoothFloat.h"
-#include "..\Minecraft.World\MobEffectInstance.h"
-#include "..\Minecraft.World\Item.h"
+#include "../Minecraft.World/net.minecraft.world.entity.h"
+#include "../Minecraft.World/net.minecraft.world.entity.player.h"
+#include "../Minecraft.World/net.minecraft.world.item.enchantment.h"
+#include "../Minecraft.World/net.minecraft.world.level.h"
+#include "../Minecraft.World/net.minecraft.world.level.material.h"
+#include "../Minecraft.World/net.minecraft.world.level.tile.h"
+#include "../Minecraft.World/net.minecraft.world.level.chunk.h"
+#include "../Minecraft.World/net.minecraft.world.level.biome.h"
+#include "../Minecraft.World/net.minecraft.world.level.dimension.h"
+#include "../Minecraft.World/net.minecraft.world.phys.h"
+#include "../Minecraft.World/System.h"
+#include "../Minecraft.World/FloatBuffer.h"
+#include "../Minecraft.World/ThreadName.h"
+#include "../Minecraft.World/SparseLightStorage.h"
+#include "../Minecraft.World/CompressedTileStorage.h"
+#include "../Minecraft.World/SparseDataStorage.h"
+#include "../Minecraft.World/JavaMath.h"
+#include "../Minecraft.World/Facing.h"
+#include "../Minecraft.World/MobEffect.h"
+#include "../Minecraft.World/IntCache.h"
+#include "../Minecraft.World/SmoothFloat.h"
+#include "../Minecraft.World/MobEffectInstance.h"
+#include "../Minecraft.World/Item.h"
 #include "Camera.h"
-#include "..\Minecraft.World\SoundTypes.h"
+#include "../Minecraft.World/SoundTypes.h"
 #include "HumanoidModel.h"
-#include "..\Minecraft.World\Item.h"
-#include "..\Minecraft.World\compression.h"
-#include "PS3\PS3Extras\ShutdownManager.h"
+#include "../Minecraft.World/Item.h"
+#include "../Minecraft.World/compression.h"
+#include "PS3/PS3Extras/ShutdownManager.h"
 #include "BossMobGuiInfo.h"
 
 #include "TexturePackRepository.h"
@@ -309,7 +309,7 @@ void GameRenderer::pick(float a)
 	vector<shared_ptr<Entity> > *objects = mc->level->getEntities(mc->cameraTargetPlayer, mc->cameraTargetPlayer->bb->expand(b->x * (range), b->y * (range), b->z * (range))->grow(overlap, overlap, overlap));
 	double nearest = dist;
 
-    for (auto& e : *objects )
+	for (auto& e : *objects )
     {
 		if ( e == nullptr || !e->isPickable() ) continue;
 
@@ -342,6 +342,7 @@ void GameRenderer::pick(float a)
 		}
 		delete p;
 	}
+	delete objects;
 
 	if (hovered != NULL)
 	{
@@ -580,7 +581,7 @@ void GameRenderer::moveCameraToPlayer(float a)
 
 void GameRenderer::zoomRegion(double zoom, double xa, double ya)
 {
-	zoom = zoom;
+	this->zoom = zoom;
 	zoom_x = xa;
 	zoom_y = ya;
 }
@@ -1230,29 +1231,33 @@ void GameRenderer::AddForDelete(byte *deleteThis)
 {
 	EnterCriticalSection(&m_csDeleteStack);
 	m_deleteStackByte.push_back(deleteThis);
+	LeaveCriticalSection(&m_csDeleteStack);
 }
 
 void GameRenderer::AddForDelete(SparseLightStorage *deleteThis)
 {
 	EnterCriticalSection(&m_csDeleteStack);
 	m_deleteStackSparseLightStorage.push_back(deleteThis);
+	LeaveCriticalSection(&m_csDeleteStack);
 }
 
 void GameRenderer::AddForDelete(CompressedTileStorage *deleteThis)
 {
 	EnterCriticalSection(&m_csDeleteStack);
 	m_deleteStackCompressedTileStorage.push_back(deleteThis);
+	LeaveCriticalSection(&m_csDeleteStack);
 }
 
 void GameRenderer::AddForDelete(SparseDataStorage *deleteThis)
 {
 	EnterCriticalSection(&m_csDeleteStack);
 	m_deleteStackSparseDataStorage.push_back(deleteThis);
+	LeaveCriticalSection(&m_csDeleteStack);
 }
 
 void GameRenderer::FinishedReassigning()
 {
-	LeaveCriticalSection(&m_csDeleteStack);
+	// Lock is now properly scoped per AddForDelete call -- no-op retained for API compat
 }
 
 int GameRenderer::runUpdate(LPVOID lpParam)
@@ -1293,11 +1298,14 @@ int GameRenderer::runUpdate(LPVOID lpParam)
 		int count = 0;
 		static const int MAX_DEFERRED_UPDATES = 10;
 		bool shouldContinue = false;
-		do
+		if (minecraft->levelRenderer)
 		{
-			shouldContinue = minecraft->levelRenderer->updateDirtyChunks();
-			count++;
-		} while ( shouldContinue && count < MAX_DEFERRED_UPDATES );
+			do
+			{
+				shouldContinue = minecraft->levelRenderer->updateDirtyChunks();
+				count++;
+			} while ( shouldContinue && count < MAX_DEFERRED_UPDATES );
+		}
 
 		//		while( minecraft->levelRenderer->updateDirtyChunks() )
 		//			;
@@ -1305,7 +1313,8 @@ int GameRenderer::runUpdate(LPVOID lpParam)
 
 		// If any renderable tile entities were flagged in this last block of chunk(s) that were udpated, then change their
 		// flags to say that this deferred chunk is over and they are actually safe to be removed now
-		minecraft->levelRenderer->fullyFlagRenderableTileEntitiesToBeRemoved();
+		if (minecraft->levelRenderer)
+			minecraft->levelRenderer->fullyFlagRenderableTileEntitiesToBeRemoved();
 
 		// We've got stacks for things that can only safely be deleted whilst this thread isn't updating things - delete those things now
 		EnterCriticalSection(&m_csDeleteStack);

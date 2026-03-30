@@ -1,5 +1,5 @@
 #include "stdafx.h"
-#include <xhash>
+#include <functional>
 
 #include "Hasher.h"
 

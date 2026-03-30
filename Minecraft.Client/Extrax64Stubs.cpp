@@ -4,35 +4,42 @@
 #endif // __PS3__
 
 #ifdef __PS3__
-#include "PS3\Sentient\SentientManager.h"
+#include "PS3/Sentient/SentientManager.h"
 #include "StatsCounter.h"
-#include "PS3\Social\SocialManager.h"
+#include "PS3/Social/SocialManager.h"
 #include <libsn.h>
 #include <libsntuner.h>
 #elif defined _DURANGO
-#include "Durango\Sentient\SentientManager.h"
+#include "Durango/Sentient/SentientManager.h"
 #include "StatsCounter.h"
-#include "Durango\Social\SocialManager.h"
-#include "Durango\Sentient\DynamicConfigurations.h"
-#include "Durango\DurangoExtras\xcompress.h"
+#include "Durango/Social/SocialManager.h"
+#include "Durango/Sentient/DynamicConfigurations.h"
+#include "Durango/DurangoExtras/xcompress.h"
 #elif defined _WINDOWS64
-#include "Windows64\Sentient\SentientManager.h"
+#include "Windows64/Sentient/SentientManager.h"
 #include "StatsCounter.h"
-#include "Windows64\Social\SocialManager.h"
-#include "Windows64\Sentient\DynamicConfigurations.h"
-#include "Windows64\Network\WinsockNetLayer.h"
-#include "Windows64\Windows64_Xuid.h"
+#include "Windows64/Social/SocialManager.h"
+#include "Windows64/Sentient/DynamicConfigurations.h"
+#include "Windows64/Network/WinsockNetLayer.h"
+#include "Windows64/Windows64_Xuid.h"
+#elif defined _LINUX64
+#include "Linux64/Sentient/SentientManager.h"
+#include "StatsCounter.h"
+#include "Linux64/Social/SocialManager.h"
+#include "Linux64/Sentient/DynamicConfigurations.h"
+#include "Linux64/Network/PosixNetLayer.h"
+#include "Windows64/Windows64_Xuid.h"
 #elif defined __PSVITA__
-#include "PSVita\Sentient\SentientManager.h"
+#include "PSVita/Sentient/SentientManager.h"
 #include "StatsCounter.h"
-#include "PSVita\Social\SocialManager.h"
-#include "PSVita\Sentient\DynamicConfigurations.h"
+#include "PSVita/Social/SocialManager.h"
+#include "PSVita/Sentient/DynamicConfigurations.h"
 #include <libperf.h>
 #else
-#include "Orbis\Sentient\SentientManager.h"
+#include "Orbis/Sentient/SentientManager.h"
 #include "StatsCounter.h"
-#include "Orbis\Social\SocialManager.h"
-#include "Orbis\Sentient\DynamicConfigurations.h"
+#include "Orbis/Social/SocialManager.h"
+#include "Orbis/Sentient/DynamicConfigurations.h"
 #include <perf.h>
 #endif
 
@@ -78,7 +85,8 @@ void PIXBeginNamedEvent(int a, char* b, ...)
 	char buf[512];
 	va_list args;
 	va_start(args, b);
-	vsprintf(buf, b, args);
+	vsnprintf(buf, sizeof(buf), b, args);
+	va_end(args);
 	sceRazorCpuPushMarker(buf, 0xffffffff, SCE_RAZOR_MARKER_ENABLE_HUD);
 
 #endif
@@ -87,7 +95,7 @@ void PIXBeginNamedEvent(int a, char* b, ...)
 	wchar_t wbuf[256];
 	va_list args;
 	va_start(args, b);
-	vsprintf(buf, b, args);
+	vsnprintf(buf, sizeof(buf), b, args);
 	snPushMarker(buf);
 
 	// 	mbstowcs(wbuf,buf,256);
@@ -170,11 +178,7 @@ void PIXSetMarkerDeprecated(int a, char* b, ...) {}
 
 bool IsEqualXUID(PlayerUID a, PlayerUID b)
 {
-#if defined(__PS3__) || defined(__ORBIS__) || defined (__PSVITA__) || defined(_DURANGO)
 	return (a == b);
-#else
-	return false;
-#endif
 }
 
 void XMemCpy(void* a, const void* b, size_t s) { memcpy(a, b, s); }
@@ -391,6 +395,11 @@ HRESULT XMemDecompress(
 	SIZE_T SrcSize
 )
 {
+	(void)Context;
+	if (pDestination == NULL || pDestSize == NULL || pSource == NULL)
+		return E_INVALIDARG;
+	if (*pDestSize < SrcSize)
+		return E_FAIL;
 	memcpy(pDestination, pSource, SrcSize);
 	*pDestSize = SrcSize;
 	return S_OK;
@@ -422,6 +431,11 @@ HRESULT XMemCompress(
 	SIZE_T SrcSize
 )
 {
+	(void)Context;
+	if (pDestination == NULL || pDestSize == NULL || pSource == NULL)
+		return E_INVALIDARG;
+	if (*pDestSize < SrcSize)
+		return E_FAIL;
 	memcpy(pDestination, pSource, SrcSize);
 	*pDestSize = SrcSize;
 	return S_OK;
@@ -658,7 +672,7 @@ int					C_4JProfile::SetOldProfileVersionCallback(int(*Func)(LPVOID, unsigned ch
 // To store the dashboard preferences for controller flipped, etc.
 C_4JProfile::PROFILESETTINGS ProfileSettingsA[XUSER_MAX_COUNT];
 
-C_4JProfile::PROFILESETTINGS* C_4JProfile::GetDashboardProfileSettings(int iPad) { return &ProfileSettingsA[iPad]; }
+C_4JProfile::PROFILESETTINGS* C_4JProfile::GetDashboardProfileSettings(int iPad) { if (iPad < 0 || iPad >= XUSER_MAX_COUNT) return NULL; return &ProfileSettingsA[iPad]; }
 void				C_4JProfile::WriteToProfile(int iQuadrant, bool bGameDefinedDataChanged, bool bOverride5MinuteLimitOnProfileWrites) {}
 void				C_4JProfile::ForceQueuedProfileWrites(int iPad) {}
 void* C_4JProfile::GetGameDefinedProfileData(int iQuadrant)
@@ -667,6 +681,7 @@ void* C_4JProfile::GetGameDefinedProfileData(int iQuadrant)
 	//defaultOptionsCallback(lpProfileParam, (C_4JProfile::PROFILESETTINGS *)profileData[iQuadrant], iQuadrant);
 	//pApp->SetDefaultOptions(pSettings,iPad);
 
+	if (iQuadrant < 0 || iQuadrant >= 4) return NULL;
 	return profileData[iQuadrant];
 }
 void				C_4JProfile::ResetProfileProcessState() {}

@@ -51,8 +51,8 @@ bool FolderTexturePack::isTerrainUpdateCompatible()
 {
 #if 0
 	final File dir = new File(this.file, "textures/");
-	final boolean hasTexturesFolder = dir.exists() && dir.isDirectory();
-	final boolean hasOldFiles = hasFile("terrain.png") || hasFile("gui/items.png");
+	final bool hasTexturesFolder = dir.exists() && dir.isDirectory();
+	final bool hasOldFiles = hasFile("terrain.png") || hasFile("gui/items.png");
 	return hasTexturesFolder || !hasOldFiles;
 #endif
 	return true;

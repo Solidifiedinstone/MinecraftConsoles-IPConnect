@@ -9,46 +9,46 @@
 #include "TakeAnimationParticle.h"
 #include "CritParticle.h"
 #include "User.h"
-#include "..\Minecraft.World\net.minecraft.world.level.storage.h"
-#include "..\Minecraft.World\net.minecraft.world.level.chunk.h"
-#include "..\Minecraft.World\net.minecraft.stats.h"
-#include "..\Minecraft.World\net.minecraft.world.entity.h"
-#include "..\Minecraft.World\net.minecraft.world.entity.ai.attributes.h"
-#include "..\Minecraft.World\net.minecraft.world.entity.player.h"
-#include "..\Minecraft.World\net.minecraft.world.entity.animal.h"
-#include "..\Minecraft.World\net.minecraft.world.entity.npc.h"
-#include "..\Minecraft.World\net.minecraft.world.entity.item.h"
-#include "..\Minecraft.World\net.minecraft.world.entity.projectile.h"
-#include "..\Minecraft.World\net.minecraft.world.entity.global.h"
-#include "..\Minecraft.World\net.minecraft.world.entity.boss.enderdragon.h"
-#include "..\Minecraft.World\net.minecraft.world.entity.monster.h"
-#include "..\Minecraft.World\net.minecraft.world.level.tile.entity.h"
-#include "..\Minecraft.World\net.minecraft.world.item.h"
-#include "..\Minecraft.World\net.minecraft.world.item.trading.h"
-#include "..\Minecraft.World\net.minecraft.world.level.tile.h"
-#include "..\Minecraft.World\net.minecraft.world.inventory.h"
-#include "..\Minecraft.World\net.minecraft.world.h"
-#include "..\Minecraft.World\net.minecraft.world.level.saveddata.h"
-#include "..\Minecraft.World\net.minecraft.world.level.dimension.h"
-#include "..\Minecraft.World\net.minecraft.world.effect.h"
-#include "..\Minecraft.World\net.minecraft.world.food.h"
-#include "..\Minecraft.World\SharedConstants.h"
-#include "..\Minecraft.World\AABB.h"
-#include "..\Minecraft.World\Pos.h"
-#include "..\Minecraft.World\Socket.h"
+#include "../Minecraft.World/net.minecraft.world.level.storage.h"
+#include "../Minecraft.World/net.minecraft.world.level.chunk.h"
+#include "../Minecraft.World/net.minecraft.stats.h"
+#include "../Minecraft.World/net.minecraft.world.entity.h"
+#include "../Minecraft.World/net.minecraft.world.entity.ai.attributes.h"
+#include "../Minecraft.World/net.minecraft.world.entity.player.h"
+#include "../Minecraft.World/net.minecraft.world.entity.animal.h"
+#include "../Minecraft.World/net.minecraft.world.entity.npc.h"
+#include "../Minecraft.World/net.minecraft.world.entity.item.h"
+#include "../Minecraft.World/net.minecraft.world.entity.projectile.h"
+#include "../Minecraft.World/net.minecraft.world.entity.global.h"
+#include "../Minecraft.World/net.minecraft.world.entity.boss.enderdragon.h"
+#include "../Minecraft.World/net.minecraft.world.entity.monster.h"
+#include "../Minecraft.World/net.minecraft.world.level.tile.entity.h"
+#include "../Minecraft.World/net.minecraft.world.item.h"
+#include "../Minecraft.World/net.minecraft.world.item.trading.h"
+#include "../Minecraft.World/net.minecraft.world.level.tile.h"
+#include "../Minecraft.World/net.minecraft.world.inventory.h"
+#include "../Minecraft.World/net.minecraft.world.h"
+#include "../Minecraft.World/net.minecraft.world.level.saveddata.h"
+#include "../Minecraft.World/net.minecraft.world.level.dimension.h"
+#include "../Minecraft.World/net.minecraft.world.effect.h"
+#include "../Minecraft.World/net.minecraft.world.food.h"
+#include "../Minecraft.World/SharedConstants.h"
+#include "../Minecraft.World/AABB.h"
+#include "../Minecraft.World/Pos.h"
+#include "../Minecraft.World/Socket.h"
 #include "Minecraft.h"
 #include "ProgressRenderer.h"
 #include "LevelRenderer.h"
 #include "Options.h"
 #include "MinecraftServer.h"
 #include "ClientConstants.h"
-#include "..\Minecraft.World\SoundTypes.h"
-#include "..\Minecraft.World\BasicTypeContainers.h"
+#include "../Minecraft.World/SoundTypes.h"
+#include "../Minecraft.World/BasicTypeContainers.h"
 #include "TexturePackRepository.h"
 #ifdef _XBOX
-#include "Common\XUI\XUI_Scene_Trading.h"
+#include "Common/XUI/XUI_Scene_Trading.h"
 #else
-#include "Common\UI\UI.h"
+#include "Common/UI/UI.h"
 #endif
 #ifdef __PS3__
 #include "PS3/Network/SonyVoiceChat.h"
@@ -56,14 +56,14 @@
 #include "DLCTexturePack.h"
 
 #ifdef _WINDOWS64
-#include "Xbox\Network\NetworkPlayerXbox.h"
-#include "Common\Network\PlatformNetworkManagerStub.h"
+#include "Xbox/Network/NetworkPlayerXbox.h"
+#include "Common/Network/PlatformNetworkManagerStub.h"
 #endif
 
 
 #ifdef _DURANGO
-#include "..\Minecraft.World\DurangoStats.h"
-#include "..\Minecraft.World\GenericStats.h"
+#include "../Minecraft.World/DurangoStats.h"
+#include "../Minecraft.World/GenericStats.h"
 #endif
 
 ClientConnection::ClientConnection(Minecraft *minecraft, const wstring& ip, int port)
@@ -151,8 +151,8 @@ ClientConnection::~ClientConnection()
 
 void ClientConnection::tick()
 {
-	if (!done) connection->tick();
-	connection->flush();
+	if (!done && connection) connection->tick();
+	if (connection) connection->flush();
 }
 
 INetworkPlayer *ClientConnection::getNetworkPlayer()
@@ -427,6 +427,7 @@ void ClientConnection::handleAddEntity(shared_ptr<AddEntityPacket> packet)
 	{
 	case AddEntityPacket::MINECART:
 		e = Minecart::createMinecart(level, x, y, z, packet->data);
+		break;
 	case AddEntityPacket::FISH_HOOK:
 		{
 			// 4J Stu - Brought forward from 1.4 to be able to drop XP from fishing
@@ -1118,6 +1119,7 @@ void ClientConnection::handleChunkVisibility(shared_ptr<ChunkVisibilityPacket> p
 void ClientConnection::handleChunkTilesUpdate(shared_ptr<ChunkTilesUpdatePacket> packet)
 {
 	// 4J - changed to encode level in packet
+	if (packet->levelIdx < 0 || (unsigned)packet->levelIdx >= minecraft->levels.length) return;
 	MultiPlayerLevel *dimensionLevel = (MultiPlayerLevel *)minecraft->levels[packet->levelIdx];
 	if( dimensionLevel )
 	{
@@ -1187,6 +1189,7 @@ void ClientConnection::handleChunkTilesUpdate(shared_ptr<ChunkTilesUpdatePacket>
 void ClientConnection::handleBlockRegionUpdate(shared_ptr<BlockRegionUpdatePacket> packet)
 {
 	// 4J - changed to encode level in packet
+	if (packet->levelIdx < 0 || (unsigned)packet->levelIdx >= minecraft->levels.length) return;
 	MultiPlayerLevel *dimensionLevel = (MultiPlayerLevel *)minecraft->levels[packet->levelIdx];
 	if( dimensionLevel )
 	{
@@ -1244,6 +1247,7 @@ void ClientConnection::handleTileUpdate(shared_ptr<TileUpdatePacket> packet)
 		destroyTilePacket = true;
 	}
 	// 4J - changed to encode level in packet
+	if (packet->levelIdx < 0 || (unsigned)packet->levelIdx >= minecraft->levels.length) return;
 	MultiPlayerLevel *dimensionLevel = (MultiPlayerLevel *)minecraft->levels[packet->levelIdx];
 	if( dimensionLevel )
 	{
@@ -1460,7 +1464,7 @@ void ClientConnection::handleChat(shared_ptr<ChatPacket> packet)
 	case ChatPacket::e_ChatBedPlayerSleep:
 		message=app.GetString(IDS_TILE_BED_PLAYERSLEEP);
 		iPos=message.find(L"%s");
-		message.replace(iPos,2,playerDisplayName);
+		if (iPos != wstring::npos) message.replace(iPos,2,playerDisplayName);
 		break;
 	case ChatPacket::e_ChatBedMeSleep:
 		message=app.GetString(IDS_TILE_BED_MESLEEP);
@@ -1468,17 +1472,17 @@ void ClientConnection::handleChat(shared_ptr<ChatPacket> packet)
 	case ChatPacket::e_ChatPlayerJoinedGame:
 		message=app.GetString(IDS_PLAYER_JOINED);
 		iPos=message.find(L"%s");
-		message.replace(iPos,2,playerDisplayName);
+		if (iPos != wstring::npos) message.replace(iPos,2,playerDisplayName);
 		break;
 	case ChatPacket::e_ChatPlayerLeftGame:
 		message=app.GetString(IDS_PLAYER_LEFT);
 		iPos=message.find(L"%s");
-		message.replace(iPos,2,playerDisplayName);
+		if (iPos != wstring::npos) message.replace(iPos,2,playerDisplayName);
 		break;
 	case ChatPacket::e_ChatPlayerKickedFromGame:
 		message=app.GetString(IDS_PLAYER_KICKED);
 		iPos=message.find(L"%s");
-		message.replace(iPos,2,playerDisplayName);
+		if (iPos != wstring::npos) message.replace(iPos,2,playerDisplayName);
 		break;
 	case ChatPacket::e_ChatCannotPlaceLava:
 		displayOnGui = false;
@@ -1696,12 +1700,12 @@ void ClientConnection::handleChat(shared_ptr<ChatPacket> packet)
 	case ChatPacket::e_ChatPlayerEnteredEnd:
 		message=app.GetString(IDS_PLAYER_ENTERED_END);
 		iPos=message.find(L"%s");
-		message.replace(iPos,2,playerDisplayName);
+		if (iPos != wstring::npos) message.replace(iPos,2,playerDisplayName);
 		break;
 	case ChatPacket::e_ChatPlayerLeftEnd:
 		message=app.GetString(IDS_PLAYER_LEFT_END);
 		iPos=message.find(L"%s");
-		message.replace(iPos,2,playerDisplayName);
+		if (iPos != wstring::npos) message.replace(iPos,2,playerDisplayName);
 		break;
 
 	case ChatPacket::e_ChatPlayerMaxEnemies:
@@ -3671,9 +3675,11 @@ void ClientConnection::handleXZ(shared_ptr<XZPacket> packet)
 {
 	if(packet->action==XZPacket::STRONGHOLD)
 	{
-		minecraft->levels[0]->getLevelData()->setXStronghold(packet->x);
-		minecraft->levels[0]->getLevelData()->setZStronghold(packet->z);
-		minecraft->levels[0]->getLevelData()->setHasStronghold();
+		if (minecraft->levels[0] != NULL) {
+			minecraft->levels[0]->getLevelData()->setXStronghold(packet->x);
+			minecraft->levels[0]->getLevelData()->setZStronghold(packet->z);
+			minecraft->levels[0]->getLevelData()->setHasStronghold();
+		}
 	}
 }
 

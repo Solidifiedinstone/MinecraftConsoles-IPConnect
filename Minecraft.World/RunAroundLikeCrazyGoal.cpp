@@ -41,20 +41,21 @@ void RunAroundLikeCrazyGoal::tick()
 	if (horse->getRandom()->nextInt(50) == 0)
 	{
 
-		if ( horse->rider.lock()->instanceof(eTYPE_PLAYER) )
+		auto rdr = horse->rider.lock();
+		if (rdr && rdr->instanceof(eTYPE_PLAYER))
 		{
 			int temper = horse->getTemper();
 			int maxTemper = horse->getMaxTemper();
 			if (maxTemper > 0 && horse->getRandom()->nextInt(maxTemper) < temper)
 			{
-				horse->tameWithName(dynamic_pointer_cast<Player>(horse->rider.lock()));
+				horse->tameWithName(dynamic_pointer_cast<Player>(rdr));
 				horse->level->broadcastEntityEvent(horse->shared_from_this(), EntityEvent::TAMING_SUCCEEDED);
 				return;
 			}
 			horse->modifyTemper(5);
 		}
 
-		horse->rider.lock()->ride(nullptr);
+		if (rdr) rdr->ride(nullptr);
 		horse->rider = weak_ptr<LivingEntity>();
 		horse->makeMad();
 		horse->level->broadcastEntityEvent(horse->shared_from_this(), EntityEvent::TAMING_FAILED);

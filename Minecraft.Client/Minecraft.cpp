@@ -35,45 +35,47 @@
 #include "FrustumCuller.h"
 #include "Camera.h"
 
-#include "..\Minecraft.World\MobEffect.h"
-#include "..\Minecraft.World\Difficulty.h"
-#include "..\Minecraft.World\net.minecraft.world.level.h"
-#include "..\Minecraft.World\net.minecraft.world.entity.h"
-#include "..\Minecraft.World\net.minecraft.world.entity.player.h"
-#include "..\Minecraft.World\net.minecraft.world.entity.item.h"
-#include "..\Minecraft.World\net.minecraft.world.phys.h"
-#include "..\Minecraft.World\File.h"
-#include "..\Minecraft.World\net.minecraft.world.level.storage.h"
-#include "..\Minecraft.World\net.minecraft.h"
-#include "..\Minecraft.World\net.minecraft.stats.h"
-#include "..\Minecraft.World\System.h"
-#include "..\Minecraft.World\ByteBuffer.h"
-#include "..\Minecraft.World\net.minecraft.world.level.tile.h"
-#include "..\Minecraft.World\net.minecraft.world.level.chunk.h"
-#include "..\Minecraft.World\net.minecraft.world.level.dimension.h"
-#include "..\Minecraft.World\net.minecraft.world.item.h"
-#include "..\Minecraft.World\Minecraft.World.h"
-#include "Windows64\Windows64_Xuid.h"
+#include "../Minecraft.World/MobEffect.h"
+#include "../Minecraft.World/Difficulty.h"
+#include "../Minecraft.World/net.minecraft.world.level.h"
+#include "../Minecraft.World/net.minecraft.world.entity.h"
+#include "../Minecraft.World/net.minecraft.world.entity.player.h"
+#include "../Minecraft.World/net.minecraft.world.entity.item.h"
+#include "../Minecraft.World/net.minecraft.world.phys.h"
+#include "../Minecraft.World/File.h"
+#include "../Minecraft.World/net.minecraft.world.level.storage.h"
+#include "../Minecraft.World/net.minecraft.h"
+#include "../Minecraft.World/net.minecraft.stats.h"
+#include "../Minecraft.World/System.h"
+#include "../Minecraft.World/ByteBuffer.h"
+#include "../Minecraft.World/net.minecraft.world.level.tile.h"
+#include "../Minecraft.World/net.minecraft.world.level.chunk.h"
+#include "../Minecraft.World/net.minecraft.world.level.dimension.h"
+#include "../Minecraft.World/net.minecraft.world.item.h"
+#include "../Minecraft.World/Minecraft.World.h"
+#include "Windows64/Windows64_Xuid.h"
 #include "ClientConnection.h"
-#include "..\Minecraft.World\HellRandomLevelSource.h"
-#include "..\Minecraft.World\net.minecraft.world.entity.animal.h"
-#include "..\Minecraft.World\net.minecraft.world.entity.monster.h"
-#include "..\Minecraft.World\StrongholdFeature.h"
-#include "..\Minecraft.World\IntCache.h"
-#include "..\Minecraft.World\Villager.h"
-#include "..\Minecraft.World\SparseLightStorage.h"
-#include "..\Minecraft.World\SparseDataStorage.h"
-#include "..\Minecraft.World\ChestTileEntity.h"
+#include "../Minecraft.World/HellRandomLevelSource.h"
+#include "../Minecraft.World/net.minecraft.world.entity.animal.h"
+#include "../Minecraft.World/net.minecraft.world.entity.monster.h"
+#include "../Minecraft.World/StrongholdFeature.h"
+#include "../Minecraft.World/IntCache.h"
+#include "../Minecraft.World/Villager.h"
+#include "../Minecraft.World/SparseLightStorage.h"
+#include "../Minecraft.World/SparseDataStorage.h"
+#include "../Minecraft.World/ChestTileEntity.h"
 #include "TextureManager.h"
 #ifdef _XBOX
-#include "Xbox\Network\NetworkPlayerXbox.h"
+#include "Xbox/Network/NetworkPlayerXbox.h"
 #endif
-#include "Common\UI\IUIScene_CreativeMenu.h"
-#include "Common\UI\UIFontData.h"
+#include "Common/UI/IUIScene_CreativeMenu.h"
+#include "Common/UI/UIFontData.h"
+#include "Common/Network/GameNetworkManager.h"
+#include "Common/Network/SessionInfo.h"
 #include "DLCTexturePack.h"
 
 #ifdef __ORBIS__
-#include "Orbis\Network\PsPlusUpsellWrapper_Orbis.h"
+#include "Orbis/Network/PsPlusUpsellWrapper_Orbis.h"
 #endif
 
 // #define DISABLE_SPU_CODE
@@ -132,7 +134,7 @@ Minecraft::Minecraft(Component *mouseComponent, Canvas *parent, MinecraftApplet 
 	particleEngine = NULL;
 	user = NULL;
 	parent = NULL;
-	pause = false;
+	paused = false;
 	textures = NULL;
 	font = NULL;
 	screen = NULL;
@@ -415,67 +417,83 @@ void Minecraft::init()
 	MemSect(0);
 	gui = new Gui(this);
 
+	// Determine connect target: command-line arg or server.txt auto-connect
+	wstring autoIp;
+	int autoPort = 25565;
+
 	if (connectToIp != L"")	// 4J - was NULL comparison
 	{
-		setScreen(new ConnectScreen(this, connectToIp, connectToPort));
+		autoIp = connectToIp;
+		autoPort = connectToPort;
 	}
 	else
 	{
 		// Try to auto-connect from server.txt in the working directory.
 		// Format: plain IP, IP:port, [IPv6]:port, or [IPv6]
-		wstring autoIp;
-		int autoPort = 25565;
+		HANDLE hServerFile = CreateFileW(L"server.txt", GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+		if (hServerFile != INVALID_HANDLE_VALUE)
 		{
-			HANDLE hServerFile = CreateFileW(L"server.txt", GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-			if (hServerFile != INVALID_HANDLE_VALUE)
+			char buf[256] = {};
+			DWORD bytesRead = 0;
+			ReadFile(hServerFile, buf, sizeof(buf) - 1, &bytesRead, NULL);
+			CloseHandle(hServerFile);
+			if (bytesRead > 0)
 			{
-				char buf[256] = {};
-				DWORD bytesRead = 0;
-				ReadFile(hServerFile, buf, sizeof(buf) - 1, &bytesRead, NULL);
-				CloseHandle(hServerFile);
-				if (bytesRead > 0)
+				wchar_t wbuf[256] = {};
+				MultiByteToWideChar(CP_UTF8, 0, buf, -1, wbuf, 256);
+				wstring line(wbuf);
+				while (!line.empty() && (line.back() == L'\r' || line.back() == L'\n' || line.back() == L' '))
+					line.pop_back();
+				if (!line.empty() && line[0] == L'[')
 				{
-					wchar_t wbuf[256] = {};
-					MultiByteToWideChar(CP_UTF8, 0, buf, -1, wbuf, 256);
-					wstring line(wbuf);
-					while (!line.empty() && (line.back() == L'\r' || line.back() == L'\n' || line.back() == L' '))
-						line.pop_back();
-					if (!line.empty() && line[0] == L'[')
+					// Bracketed IPv6: [addr]:port or [addr]
+					size_t closeBracket = line.find(L']');
+					if (closeBracket != wstring::npos)
 					{
-						// Bracketed IPv6: [addr]:port or [addr]
-						size_t closeBracket = line.find(L']');
-						if (closeBracket != wstring::npos)
+						autoIp = line.substr(1, closeBracket - 1);
+						if (closeBracket + 1 < line.size() && line[closeBracket + 1] == L':')
 						{
-							autoIp = line.substr(1, closeBracket - 1);
-							if (closeBracket + 1 < line.size() && line[closeBracket + 1] == L':')
-							{
-								int p = _wtoi(line.substr(closeBracket + 2).c_str());
-								if (p > 0) autoPort = p;
-							}
+							int p = _wtoi(line.substr(closeBracket + 2).c_str());
+							if (p > 0) autoPort = p;
 						}
+					}
+				}
+				else
+				{
+					// IPv4 or hostname: use rfind(':') to split off optional port
+					size_t colonPos = line.rfind(L':');
+					if (colonPos != wstring::npos && colonPos > 0)
+					{
+						autoIp = line.substr(0, colonPos);
+						int p = _wtoi(line.substr(colonPos + 1).c_str());
+						if (p > 0) autoPort = p;
 					}
 					else
 					{
-						// IPv4 or hostname: use rfind(':') to split off optional port
-						size_t colonPos = line.rfind(L':');
-						if (colonPos != wstring::npos && colonPos > 0)
-						{
-							autoIp = line.substr(0, colonPos);
-							int p = _wtoi(line.substr(colonPos + 1).c_str());
-							if (p > 0) autoPort = p;
-						}
-						else
-						{
-							autoIp = line;
-						}
+						autoIp = line;
 					}
 				}
 			}
 		}
-		if (!autoIp.empty())
-			setScreen(new ConnectScreen(this, autoIp, autoPort));
-		else
-			setScreen(new TitleScreen());
+	}
+
+	if (!autoIp.empty())
+	{
+		// Use the proper network manager join flow instead of the dead
+		// ConnectScreen/ClientConnection(wstring&,int) path (assert(FALSE)).
+		FriendSessionInfo session;
+		char narrowIp[64] = {};
+		wcstombs(narrowIp, autoIp.c_str(), sizeof(narrowIp) - 1);
+		strncpy(session.data.hostIP, narrowIp, sizeof(session.data.hostIP) - 1);
+		session.data.hostPort = autoPort;
+		wcsncpy(session.data.hostName, L"server.txt", 32);
+		session.data.isReadyToJoin = true;
+		session.data.isJoinable = true;
+		g_NetworkManager.JoinGame(&session, 0);
+	}
+	else
+	{
+		setScreen(new TitleScreen());
 	}
 	progressRenderer = new ProgressRenderer(this);
 
@@ -793,7 +811,7 @@ void Minecraft::run()
 		*/
 		checkGlError(L"Post render");
 		frames++;
-		pause = !isClientSide() && screen != NULL && screen->isPauseScreen();
+		paused = !isClientSide() && screen != NULL && screen->isPauseScreen();
 
 		while (System::currentTimeMillis() >= lastTime + 1000)
 		{
@@ -844,6 +862,7 @@ void Minecraft::run()
 // 4J added - Selects which local player is currently active for processing by the existing minecraft code
 bool Minecraft::setLocalPlayerIdx(int idx)
 {
+	if (idx < 0 || idx >= XUSER_MAX_COUNT) return false;
 	localPlayerIdx = idx;
 	// If the player is not null, but the game mode is then this is just a temp player
 	// whose only real purpose is to hold the viewport position
@@ -2113,9 +2132,9 @@ void Minecraft::run_middle()
 			checkGlError(L"Post render");
 			MemSect(0);
 			frames++;
-			//pause = !isClientSide() && screen != NULL && screen->isPauseScreen();
-			//pause = g_NetworkManager.IsLocalGame() && g_NetworkManager.GetPlayerCount() == 1 && app.IsPauseMenuDisplayed(ProfileManager.GetPrimaryPad());
-			pause = app.IsAppPaused();
+			//paused = !isClientSide() && screen != NULL && screen->isPauseScreen();
+			//paused = g_NetworkManager.IsLocalGame() && g_NetworkManager.GetPlayerCount() == 1 && app.IsPauseMenuDisplayed(ProfileManager.GetPrimaryPad());
+			paused = app.IsAppPaused();
 
 #ifndef _CONTENT_PACKAGE
 			while (System::nanoTime() >= lastTime + 1000000000)

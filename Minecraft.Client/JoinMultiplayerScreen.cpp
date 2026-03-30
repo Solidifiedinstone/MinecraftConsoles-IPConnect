@@ -3,8 +3,8 @@
 #include "Button.h"
 #include "EditBox.h"
 #include "Options.h"
-#include "..\Minecraft.World\net.minecraft.locale.h"
-#include "Common\Network\SessionInfo.h"
+#include "../Minecraft.World/net.minecraft.locale.h"
+#include "Common/Network/SessionInfo.h"
 
 JoinMultiplayerScreen::JoinMultiplayerScreen(Screen *lastScreen)
 {

@@ -26,7 +26,7 @@ typedef const void      *LPCVOID;
 typedef void *PVOID;
 typedef unsigned int ULONG;
 
-typedef unsigned char boolean;
+typedef unsigned char bool;
 
 typedef int                 INT;
 typedef unsigned int        UINT;

@@ -5,23 +5,23 @@ using namespace std;
 #include "Audio/Consoles_SoundEngine.h"
 
 #include <xuiapp.h>
-#include ".\Tutorial\TutorialEnum.h"
+#include "./Tutorial/TutorialEnum.h"
 
 #ifdef _XBOX
-#include ".\XUI\XUI_Helper.h"
-#include ".\XUI\XUI_HelpCredits.h"
+#include "./XUI/XUI_Helper.h"
+#include "./XUI/XUI_HelpCredits.h"
 #endif
-#include "UI\UIStructs.h"
+#include "UI/UIStructs.h"
 
-#include "..\..\Minecraft.World\DisconnectPacket.h"
+#include "../../Minecraft.World/DisconnectPacket.h"
 #include <xsocialpost.h>
 
-#include "..\StringTable.h"
-#include ".\DLC\DLCManager.h"
-#include ".\GameRules\ConsoleGameRulesConstants.h"
-#include ".\GameRules\GameRuleManager.h"
-#include "..\SkinBox.h"
-#include "..\ArchiveFile.h"
+#include "../StringTable.h"
+#include "./DLC/DLCManager.h"
+#include "./GameRules/ConsoleGameRulesConstants.h"
+#include "./GameRules/GameRuleManager.h"
+#include "../SkinBox.h"
+#include "../ArchiveFile.h"
 
 typedef struct _JoinFromInviteData
 {
@@ -594,7 +594,7 @@ public:
 	MOJANG_DATA *GetMojangDataForXuid(PlayerUID xuid);
 	static HRESULT RegisterConfigValues(WCHAR *pType, int iValue);
 
-#if defined(__PS3__) || defined(__ORBIS__) || defined(__PSVITA__)
+#if defined(__PS3__) || defined(__ORBIS__) || defined(__PSVITA__) || defined(_LINUX64)
 	HRESULT RegisterDLCData(char *pchDLCName, unsigned int uiSortIndex, char *pchImageURL);
 	bool GetDLCFullOfferIDForSkinID(const wstring &FirstSkin,ULONGLONG *pullVal);
 	DLC_INFO *GetDLCInfoForTrialOfferID(ULONGLONG ullOfferID_Trial);

@@ -42,7 +42,7 @@ int _MapDataMappings::getDimension(int id)
 		break;
 	default:
 #ifndef _CONTENT_PACKAGE
-		printf("Read invalid dimension from MapDataMapping\n");
+		printf("Read invalid dimension from MapDataMapping/n");
 		__debugbreak();
 #endif
 		break;
@@ -71,7 +71,7 @@ void _MapDataMappings::setMapping(int id, PlayerUID xuid, int dimension)
 		break;
 	default:
 #ifndef _CONTENT_PACKAGE
-		printf("Trinyg to set a MapDataMapping for an invalid dimension.\n");
+		printf("Trinyg to set a MapDataMapping for an invalid dimension./n");
 		__debugbreak();
 #endif
 		break;
@@ -110,7 +110,7 @@ void DirectoryLevelStorage::PlayerMappings::addMapping(int id, int centreX, int 
 {
 	int64_t index = ( ((int64_t)(centreZ & 0x1FFFFFFF)) << 34) | ( ((int64_t)(centreX & 0x1FFFFFFF)) << 5) | ( (scale & 0x7) << 2) | (dimension & 0x3);
 	m_mappings[index] = id;
-	//app.DebugPrintf("Adding mapping: %d - (%d,%d)/%d/%d [%I64d - 0x%016llx]\n", id, centreX, centreZ, dimension, scale, index, index);
+	//app.DebugPrintf("Adding mapping: %d - (%d,%d)/%d/%d [%I64d - 0x%016llx]/n", id, centreX, centreZ, dimension, scale, index, index);
 }
 
 bool DirectoryLevelStorage::PlayerMappings::getMapping(int &id, int centreX, int centreZ, int dimension, int scale)
@@ -119,18 +119,18 @@ bool DirectoryLevelStorage::PlayerMappings::getMapping(int &id, int centreX, int
 	//int64_t xMasked = centreX & 0x1FFFFFFF;
 	//int64_t zShifted = zMasked << 34;
 	//int64_t xShifted = xMasked << 5;
-	//app.DebugPrintf("xShifted = %d (0x%016x), zShifted = %I64d (0x%016llx)\n", xShifted, xShifted, zShifted, zShifted);
+	//app.DebugPrintf("xShifted = %d (0x%016x), zShifted = %I64d (0x%016llx)/n", xShifted, xShifted, zShifted, zShifted);
 	int64_t index = ( ((int64_t)(centreZ & 0x1FFFFFFF)) << 34) | ( ((int64_t)(centreX & 0x1FFFFFFF)) << 5) | ( (scale & 0x7) << 2) | (dimension & 0x3);
 	auto it = m_mappings.find(index);
 	if(it != m_mappings.end())
 	{
 		id = it->second;
-		//app.DebugPrintf("Found mapping: %d - (%d,%d)/%d/%d [%I64d - 0x%016llx]\n", id, centreX, centreZ, dimension, scale, index, index);
+		//app.DebugPrintf("Found mapping: %d - (%d,%d)/%d/%d [%I64d - 0x%016llx]/n", id, centreX, centreZ, dimension, scale, index, index);
 		return true;
 	}
 	else
 	{
-		//app.DebugPrintf("Failed to find mapping: (%d,%d)/%d/%d [%I64d - 0x%016llx]\n", centreX, centreZ, dimension, scale, index, index);
+		//app.DebugPrintf("Failed to find mapping: (%d,%d)/%d/%d [%I64d - 0x%016llx]/n", centreX, centreZ, dimension, scale, index, index);
 		return false;
 	}
 }
@@ -140,7 +140,7 @@ void DirectoryLevelStorage::PlayerMappings::writeMappings(DataOutputStream *dos)
 	dos->writeInt(m_mappings.size());
 	for ( auto& it : m_mappings )
 	{
-		app.DebugPrintf("    -- %lld (0x%016llx) = %d\n", it.first, it.first, it.second);
+		app.DebugPrintf("    -- %lld (0x%016llx) = %d/n", it.first, it.first, it.second);
 		dos->writeLong(it.first);
 		dos->writeInt(it.second);
 	}
@@ -154,7 +154,7 @@ void DirectoryLevelStorage::PlayerMappings::readMappings(DataInputStream *dis)
 		int64_t index = dis->readLong();
 		int id = dis->readInt();
 		m_mappings[index] = id;
-		app.DebugPrintf("    -- %lld (0x%016llx) = %d\n", index, index, id);
+		app.DebugPrintf("    -- %lld (0x%016llx) = %d/n", index, index, id);
 	}
 }
 #endif
@@ -280,11 +280,11 @@ LevelData *DirectoryLevelStorage::prepareLevel()
 			ByteArrayInputStream bais(data);
 			DataInputStream dis(&bais);
 			int count = dis.readInt();
-			app.DebugPrintf("Loading %d mappings\n", count);
+			app.DebugPrintf("Loading %d mappings/n", count);
 			for(unsigned int i = 0; i < count; ++i)
 			{
 				PlayerUID playerUid = dis.readPlayerUID();
-#ifdef _WINDOWS64
+#if defined(_WINDOWS64) || defined(_LINUX64)
 				app.DebugPrintf("  -- %d\n", playerUid);
 #else
 				app.DebugPrintf("  -- %ls\n", playerUid.toString().c_str());
@@ -412,7 +412,7 @@ void DirectoryLevelStorage::save(shared_ptr<Player> player)
 				delete it->second;
 			}
 			m_cachedSaveData[realFile.getName()] = bos;
-			app.DebugPrintf("Cached saving of file %ls due to saves being disabled\n", realFile.getName().c_str() );
+			app.DebugPrintf("Cached saving of file %ls due to saves being disabled/n", realFile.getName().c_str() );
 		}
 		else
 		{
@@ -423,7 +423,7 @@ void DirectoryLevelStorage::save(shared_ptr<Player> player)
 	}
 	else if( playerXuid != INVALID_XUID )
 	{
-		app.DebugPrintf("Not saving player as their XUID is a guest\n");
+		app.DebugPrintf("Not saving player as their XUID is a guest/n");
 		dontSaveMapMappingForPlayer(playerXuid);
 	}
 }
@@ -456,7 +456,7 @@ CompoundTag *DirectoryLevelStorage::loadPlayerDataTag(PlayerUID xuid)
 		ByteArrayInputStream bis(bos->buf, 0, bos->size());
 		CompoundTag *tag = NbtIo::readCompressed(&bis);
 		bis.reset();
-		app.DebugPrintf("Loaded player data from cached file %ls\n", realFile.getName().c_str() );
+		app.DebugPrintf("Loaded player data from cached file %ls/n", realFile.getName().c_str() );
 		return tag;
 	}
 	else if ( m_saveFile->doesFileExist( realFile ) )
@@ -681,10 +681,10 @@ void DirectoryLevelStorage::saveMapIdLookup()
 		ByteArrayOutputStream baos;
 		DataOutputStream dos(&baos);
 		dos.writeInt(m_playerMappings.size());
-		app.DebugPrintf("Saving %d mappings\n", m_playerMappings.size());
+		app.DebugPrintf("Saving %d mappings/n", m_playerMappings.size());
 		for ( auto& it : m_playerMappings )
 		{
-#ifdef _WINDOWS64
+#if defined(_WINDOWS64) || defined(_LINUX64)
 			app.DebugPrintf("  -- %d\n", it.first);
 #else
 			app.DebugPrintf("  -- %ls\n", it.first.toString().c_str());
@@ -801,7 +801,7 @@ void DirectoryLevelStorage::saveAllCachedData()
 		ConsoleSavePath realFile = ConsoleSavePath( it.first );
 		ConsoleSaveFileOutputStream fos = ConsoleSaveFileOutputStream( m_saveFile, realFile );
 
-		app.DebugPrintf("Actually writing cached file %ls\n",it.first.c_str() );
+		app.DebugPrintf("Actually writing cached file %ls/n",it.first.c_str() );
 		fos.write(bos->buf, 0, bos->size() );
 		delete bos;
 	}

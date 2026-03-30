@@ -2,7 +2,7 @@
 class Mob;
 class Options;
 using namespace std;
-#include "..\..\Minecraft.World\SoundTypes.h"
+#include "../../Minecraft.World/SoundTypes.h"
 
 #include "miniaudio.h"
 
@@ -78,11 +78,7 @@ enum MUSIC_STREAMSTATE
 
 typedef struct
 {
-	#ifndef _WINDOWS64
-	F32 x,y,z,volume,pitch;
-	#else
 	float x,y,z,volume,pitch;
-	#endif
 	int iSound;
 	bool bIs3D;	
 	bool bUseSoundsPitchVal;	
@@ -92,7 +88,7 @@ typedef struct
 }
 AUDIO_INFO;
 
-#ifdef _WINDOWS64
+#if defined(_WINDOWS64) || defined(_LINUX64)
 struct MiniAudioSound
 {
     ma_sound sound;

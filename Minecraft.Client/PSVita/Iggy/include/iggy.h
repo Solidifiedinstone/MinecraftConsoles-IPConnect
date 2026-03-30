@@ -8,7 +8,7 @@
 #define IggyVersion "1.2.30"
 #define IggyFlashVersion "9,1,2,30"
 
-#include "rrcore.h"   // base data types, macros
+#include "rrCore.h"   // base data types, macros
 
 RADDEFSTART
 
@@ -139,7 +139,7 @@ typedef struct IggyDataValue
       IggyStringUTF16 string16; // A UTF16 string, valid if type = $(IggyDatatype::IGGY_DATATYPE_string_UTF16)
       IggyStringUTF8  string8;  // A UTF8 string, valid if type = $(IggyDatatype::IGGY_DATATYPE_string_UTF8)
       F64             number;   // A 64-bit floating point number (a double); valid if type = $(IggyDatatype::IGGY_DATATYPE_number)
-      rrbool          boolval;  // A boolean value, valid if type = $(IggyDatatype::IGGY_DATATYPE_boolean)
+      rrbool          boolval;  // A bool value, valid if type = $(IggyDatatype::IGGY_DATATYPE_boolean)
       IggyName        fastname; // A fast name, valid if type = $(IggyDatatype::IGGY_DATATYPE_fastname); this is only an "in" type; Iggy will never define these itself
       void          * userdata; // A userdata pointer from a DisplayObject, valid if type = $(IggyDatatype::IGGY_DATATYPE_displayobj)
       IggyValuePath * valuepath;// A path to an object in the AS3 VM, valid if type = $(IggyDatatype::IGGY_DATATYPE_valuepath); this is only an "in" type--Iggy will never output this

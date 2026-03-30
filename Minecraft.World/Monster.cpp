@@ -10,7 +10,7 @@
 #include "net.minecraft.world.item.enchantment.h"
 #include "Monster.h"
 
-#include "..\Minecraft.Client\Minecraft.h"
+#include "../Minecraft.Client/Minecraft.h"
 
 
 Monster::Monster(Level *level) : PathfinderMob( level )
@@ -86,7 +86,7 @@ bool Monster::doHurtTarget(shared_ptr<Entity> target)
 		knockback += EnchantmentHelper::getKnockbackBonus(dynamic_pointer_cast<LivingEntity>(shared_from_this()), livingTarget);
 	}
 
-	boolean wasHurt = target->hurt(DamageSource::mobAttack(dynamic_pointer_cast<LivingEntity>(shared_from_this())), dmg);
+	bool wasHurt = target->hurt(DamageSource::mobAttack(dynamic_pointer_cast<LivingEntity>(shared_from_this())), dmg);
 
 	if (wasHurt)
 	{

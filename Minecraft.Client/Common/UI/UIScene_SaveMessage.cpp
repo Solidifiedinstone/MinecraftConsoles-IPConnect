@@ -2,7 +2,7 @@
 #include "UI.h"
 #include "UIScene_SaveMessage.h"
 #ifdef _WINDOWS64
-#include "..\..\Windows64\Network\WinsockNetLayer.h"
+#include "../../Windows64/Network/WinsockNetLayer.h"
 #endif
 
 #define PROFILE_LOADED_TIMER_ID 0

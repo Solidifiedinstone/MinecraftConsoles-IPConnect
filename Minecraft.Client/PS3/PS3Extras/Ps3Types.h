@@ -71,7 +71,7 @@ extern Cnullptr nullptr;
 
 
 // #include <math.h>
-// #include "DirectX\DirectXMath.h"
+// #include "DirectX/DirectXMath.h"
 // using namespace DirectX;
 
 #define S_OK 0
@@ -103,7 +103,7 @@ typedef const void      *LPCVOID;
 typedef void *PVOID;
 typedef unsigned long ULONG;
 
-typedef unsigned char boolean;
+typedef unsigned char bool;
 
 typedef int                 INT;
 typedef unsigned int        UINT;

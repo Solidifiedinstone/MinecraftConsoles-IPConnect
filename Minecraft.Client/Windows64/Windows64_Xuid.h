@@ -1,13 +1,15 @@
 #pragma once
 
-#ifdef _WINDOWS64
+#if defined(_WINDOWS64) || defined(_LINUX64)
 
 #include <string>
 #include <cstdio>
 #include <cstdlib>
 #include <cerrno>
 #include <cstring>
+#ifndef _LINUX64
 #include <Windows.h>
+#endif
 
 namespace Win64Xuid
 {

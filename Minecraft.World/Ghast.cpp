@@ -11,7 +11,7 @@
 #include "net.minecraft.world.damagesource.h"
 #include "net.minecraft.stats.h"
 #include "Ghast.h"
-#include "..\Minecraft.Client\Textures.h"
+#include "../Minecraft.Client/Textures.h"
 #include "LevelEvent.h"
 #include "SoundTypes.h"
 
@@ -60,7 +60,8 @@ bool Ghast::hurt(DamageSource *source, float dmg)
 		{
 			// reflected fireball, kill the ghast
 			FlyingMob::hurt(source, 1000);
-			dynamic_pointer_cast<Player>(source->getEntity())->awardStat(GenericStats::ghast(), GenericStats::param_ghast());
+			auto p = dynamic_pointer_cast<Player>(source->getEntity());
+			if (p) p->awardStat(GenericStats::ghast(), GenericStats::param_ghast());
 			return true;
 		}
 	}

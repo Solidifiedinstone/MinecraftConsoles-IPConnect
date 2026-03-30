@@ -15,52 +15,52 @@
 #include "ServerLevel.h"
 #include "ServerLevelListener.h"
 #include "Settings.h"
-#include "..\Minecraft.World\Command.h"
-#include "..\Minecraft.World\AABB.h"
-#include "..\Minecraft.World\Vec3.h"
-#include "..\Minecraft.World\net.minecraft.network.h"
-#include "..\Minecraft.World\net.minecraft.world.level.dimension.h"
-#include "..\Minecraft.World\net.minecraft.world.level.storage.h"
-#include "..\Minecraft.World\net.minecraft.world.h"
-#include "..\Minecraft.World\net.minecraft.world.level.h"
-#include "..\Minecraft.World\net.minecraft.world.level.tile.h"
-#include "..\Minecraft.World\Pos.h"
-#include "..\Minecraft.World\System.h"
-#include "..\Minecraft.World\StringHelpers.h"
-#include "..\Minecraft.World\net.minecraft.world.entity.item.h"
-#include "..\Minecraft.World\net.minecraft.world.item.h"
-#include "..\Minecraft.World\net.minecraft.world.item.enchantment.h"
-#include "..\Minecraft.World\net.minecraft.world.damagesource.h"
+#include "../Minecraft.World/Command.h"
+#include "../Minecraft.World/AABB.h"
+#include "../Minecraft.World/Vec3.h"
+#include "../Minecraft.World/net.minecraft.network.h"
+#include "../Minecraft.World/net.minecraft.world.level.dimension.h"
+#include "../Minecraft.World/net.minecraft.world.level.storage.h"
+#include "../Minecraft.World/net.minecraft.world.h"
+#include "../Minecraft.World/net.minecraft.world.level.h"
+#include "../Minecraft.World/net.minecraft.world.level.tile.h"
+#include "../Minecraft.World/Pos.h"
+#include "../Minecraft.World/System.h"
+#include "../Minecraft.World/StringHelpers.h"
+#include "../Minecraft.World/net.minecraft.world.entity.item.h"
+#include "../Minecraft.World/net.minecraft.world.item.h"
+#include "../Minecraft.World/net.minecraft.world.item.enchantment.h"
+#include "../Minecraft.World/net.minecraft.world.damagesource.h"
 #ifdef _WINDOWS64
-#include "Windows64\Network\WinsockNetLayer.h"
+#include "Windows64/Network/WinsockNetLayer.h"
 #endif
 #include <sstream>
 #ifdef SPLIT_SAVES
-#include "..\Minecraft.World\ConsoleSaveFileSplit.h"
+#include "../Minecraft.World/ConsoleSaveFileSplit.h"
 #endif
-#include "..\Minecraft.World\ConsoleSaveFileOriginal.h"
-#include "..\Minecraft.World\Socket.h"
-#include "..\Minecraft.World\net.minecraft.world.entity.h"
+#include "../Minecraft.World/ConsoleSaveFileOriginal.h"
+#include "../Minecraft.World/Socket.h"
+#include "../Minecraft.World/net.minecraft.world.entity.h"
 #include "ProgressRenderer.h"
 #include "ServerPlayer.h"
 #include "GameRenderer.h"
-#include "..\Minecraft.World\ThreadName.h"
-#include "..\Minecraft.World\IntCache.h"
-#include "..\Minecraft.World\CompressedTileStorage.h"
-#include "..\Minecraft.World\SparseLightStorage.h"
-#include "..\Minecraft.World\SparseDataStorage.h"
-#include "..\Minecraft.World\compression.h"
+#include "../Minecraft.World/ThreadName.h"
+#include "../Minecraft.World/IntCache.h"
+#include "../Minecraft.World/CompressedTileStorage.h"
+#include "../Minecraft.World/SparseLightStorage.h"
+#include "../Minecraft.World/SparseDataStorage.h"
+#include "../Minecraft.World/compression.h"
 #ifdef _XBOX
-#include "Common\XUI\XUI_DebugSetCamera.h"
+#include "Common/XUI/XUI_DebugSetCamera.h"
 #endif
-#include "PS3\PS3Extras\ShutdownManager.h"
+#include "PS3/PS3Extras/ShutdownManager.h"
 #include "ServerCommandDispatcher.h"
-#include "..\Minecraft.World\BiomeSource.h"
+#include "../Minecraft.World/BiomeSource.h"
 #include "PlayerChunkMap.h"
-#include "Common\Telemetry\TelemetryManager.h"
+#include "Common/Telemetry/TelemetryManager.h"
 #include "PlayerConnection.h"
 #ifdef _XBOX_ONE
-#include "Durango\Network\NetworkPlayerDurango.h"
+#include "Durango/Network/NetworkPlayerDurango.h"
 #endif
 
 #define DEBUG_SERVER_DONT_SPAWN_MOBS 0
@@ -425,7 +425,7 @@ static bool ExecuteConsoleCommand(MinecraftServer *server, const wstring &rawCom
 			server->warn(L"Invalid aux value: " + tokens[4]);
 			return false;
 		}
-		if (itemId <= 0 || Item::items[itemId] == NULL)
+		if (itemId <= 0 || (unsigned)itemId >= Item::items.length || Item::items[itemId] == NULL)
 		{
 			server->warn(L"Unknown item id: " + std::to_wstring(itemId));
 			return false;
@@ -481,6 +481,11 @@ static bool ExecuteConsoleCommand(MinecraftServer *server, const wstring &rawCom
 			return false;
 		}
 
+		if (enchantmentId < 0 || (unsigned)enchantmentId >= Enchantment::enchantments.length)
+		{
+			server->warn(L"Unknown enchantment id: " + std::to_wstring(enchantmentId));
+			return false;
+		}
 		Enchantment *enchantment = Enchantment::enchantments[enchantmentId];
 		if (enchantment == NULL)
 		{
@@ -758,7 +763,7 @@ bool MinecraftServer::initServer(int64_t seed, NetworkGameInitData *initData, DW
 	// 4J delete passed in save data now - this is only required for the tutorial which is loaded by passing data directly in rather than using the storage manager
 	if( initData->saveData )
 	{
-		delete initData->saveData->data;
+		delete[] initData->saveData->data;
 		initData->saveData->data = 0;
 		initData->saveData->fileSize = 0;
 	}

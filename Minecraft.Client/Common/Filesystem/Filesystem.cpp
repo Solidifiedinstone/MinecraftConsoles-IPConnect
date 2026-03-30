@@ -3,13 +3,21 @@
 
 #ifdef _WINDOWS64
 #include <windows.h>
-#endif // TODO: More os' filesystem handling for when the project moves away from only Windows
+#endif
 
 #include <stdio.h>
 
+#if defined(_LINUX64)
+// Linux: use our POSIX wrappers from LinuxTypes.h
+#define GetFileAttributesA GetFileAttributes
+#define FindFirstFileA FindFirstFile
+#define FindNextFileA FindNextFile
+typedef WIN32_FIND_DATA WIN32_FIND_DATAA;
+#endif
+
 bool FileOrDirectoryExists(const char* path)
 {
-#ifdef _WINDOWS64
+#if defined(_WINDOWS64) || defined(_LINUX64)
     DWORD attribs = GetFileAttributesA(path);
     return (attribs != INVALID_FILE_ATTRIBUTES);
 #else
@@ -20,7 +28,7 @@ bool FileOrDirectoryExists(const char* path)
 
 bool FileExists(const char* path)
 {
-#ifdef _WINDOWS64
+#if defined(_WINDOWS64) || defined(_LINUX64)
     DWORD attribs = GetFileAttributesA(path);
     return (attribs != INVALID_FILE_ATTRIBUTES && !(attribs & FILE_ATTRIBUTE_DIRECTORY));
 #else
@@ -31,7 +39,7 @@ bool FileExists(const char* path)
 
 bool DirectoryExists(const char* path)
 {
-#ifdef _WINDOWS64
+#if defined(_WINDOWS64) || defined(_LINUX64)
     DWORD attribs = GetFileAttributesA(path);
     return (attribs != INVALID_FILE_ATTRIBUTES && (attribs & FILE_ATTRIBUTE_DIRECTORY));
 #else
@@ -42,9 +50,9 @@ bool DirectoryExists(const char* path)
 
 bool GetFirstFileInDirectory(const char* directory, char* outFilePath, size_t outFilePathSize)
 {
-#ifdef _WINDOWS64
+#if defined(_WINDOWS64) || defined(_LINUX64)
     char searchPath[MAX_PATH];
-    snprintf(searchPath, MAX_PATH, "%s\\*", directory);
+    snprintf(searchPath, MAX_PATH, "%s/*", directory);
 
     WIN32_FIND_DATAA findData;
     HANDLE hFind = FindFirstFileA(searchPath, &findData);
@@ -58,15 +66,14 @@ bool GetFirstFileInDirectory(const char* directory, char* outFilePath, size_t ou
     {
         if (!(findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
         {
-            // Found a file, copy its path to the output buffer
-            snprintf(outFilePath, outFilePathSize, "%s\\%s", directory, findData.cFileName);
+            snprintf(outFilePath, outFilePathSize, "%s/%s", directory, findData.cFileName);
             FindClose(hFind);
             return true;
         }
     } while (FindNextFileA(hFind, &findData) != 0);
 
     FindClose(hFind);
-    return false; // No files found in the directory
+    return false;
 #else
     #error "GetFirstFileInDirectory not implemented for this platform"
     return false;

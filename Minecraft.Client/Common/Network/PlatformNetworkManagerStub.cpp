@@ -1,16 +1,23 @@
 #include "stdafx.h"
-#include "..\..\..\Minecraft.World\Socket.h"
-#include "..\..\..\Minecraft.World\StringHelpers.h"
+#include "../../../Minecraft.World/Socket.h"
+#include "../../../Minecraft.World/StringHelpers.h"
 #include "PlatformNetworkManagerStub.h"
-#include "..\..\Xbox\Network\NetworkPlayerXbox.h"
+#include "../../Xbox/Network/NetworkPlayerXbox.h"
 #ifdef _WINDOWS64
-#include "..\..\Windows64\Network\WinsockNetLayer.h"
-#include "..\..\Windows64\Windows64_Xuid.h"
-#include "..\..\Minecraft.h"
-#include "..\..\User.h"
-#include "..\..\MinecraftServer.h"
-#include "..\..\PlayerList.h"
+#include "../../Windows64/Network/WinsockNetLayer.h"
+#include "../../Windows64/Windows64_Xuid.h"
+#include "../../Minecraft.h"
+#include "../../User.h"
+#include "../../MinecraftServer.h"
+#include "../../PlayerList.h"
 #include <iostream>
+#elif defined(_LINUX64)
+#include "../../Linux64/Network/PosixNetLayer.h"
+#include "../../Windows64/Windows64_Xuid.h"
+#include "../../Minecraft.h"
+#include "../../User.h"
+#include "../../MinecraftServer.h"
+#include "../../PlayerList.h"
 #endif
 
 CPlatformNetworkManagerStub *g_pPlatformNetworkManager;
@@ -418,7 +425,7 @@ bool CPlatformNetworkManagerStub::_StartGame()
 
 int CPlatformNetworkManagerStub::JoinGame(FriendSessionInfo* searchResult, int localUsersMask, int primaryUserIndex)
 {
-#ifdef _WINDOWS64
+#if defined(_WINDOWS64) || defined(_LINUX64)
 	if (searchResult == NULL)
 		return CGameNetworkManager::JOINGAME_FAIL_GENERAL;
 
@@ -485,6 +492,7 @@ void CPlatformNetworkManagerStub::SetPrivateGame(bool isPrivate)
 
 void CPlatformNetworkManagerStub::RegisterPlayerChangedCallback(int iPad, void (*callback)(void *callbackParam, INetworkPlayer *pPlayer, bool leaving), void *callbackParam)
 {
+	if (iPad < 0 || iPad >= XUSER_MAX_COUNT) return;
 	playerChangedCallback[iPad] = callback;
 	playerChangedCallbackParam[iPad] = callbackParam;
 }
@@ -817,8 +825,10 @@ void CPlatformNetworkManagerStub::SearchForGames()
 				info->data.isReadyToJoin = true;
 				info->data.isJoinable = true;
 				strncpy_s(info->data.hostIP, sizeof(info->data.hostIP), ip.c_str(), _TRUNCATE);
-				info->data.hostPort = stoi(port);
-				info->sessionId = (SessionID)(static_cast<uint64_t>(inet_addr(ip.c_str())) | (static_cast<uint64_t>(stoi(port)) << 32));
+				int parsedPort = 0;
+				try { parsedPort = stoi(port); } catch (...) { delete info; continue; }
+				info->data.hostPort = parsedPort;
+				info->sessionId = (SessionID)(static_cast<uint64_t>(inet_addr(ip.c_str())) | (static_cast<uint64_t>(parsedPort) << 32));
 				friendsSessions[0].push_back(info);
 			}
 		}

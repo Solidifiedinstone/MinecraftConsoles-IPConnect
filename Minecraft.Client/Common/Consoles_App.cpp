@@ -1,63 +1,67 @@
 ﻿#include "stdafx.h"
-#include "..\..\Minecraft.World\net.minecraft.world.entity.item.h"
-#include "..\..\Minecraft.World\net.minecraft.world.entity.player.h"
-#include "..\..\Minecraft.World\net.minecraft.world.level.tile.entity.h"
-#include "..\..\Minecraft.World\net.minecraft.world.phys.h"
-#include "..\..\Minecraft.World\InputOutputStream.h"
-#include "..\..\Minecraft.World\compression.h"
-#include "..\Options.h"
-#include "..\MinecraftServer.h"
-#include "..\MultiPlayerLevel.h"
-#include "..\GameRenderer.h"
-#include "..\ProgressRenderer.h"
-#include "..\LevelRenderer.h"
-#include "..\MobSkinMemTextureProcessor.h"
-#include "..\Minecraft.h"
-#include "..\ClientConnection.h"
-#include "..\MultiPlayerLocalPlayer.h"
-#include "..\LocalPlayer.h"
-#include "..\..\Minecraft.World\Player.h"
-#include "..\..\Minecraft.World\Inventory.h"
-#include "..\..\Minecraft.World\Level.h"
-#include "..\..\Minecraft.World\FurnaceTileEntity.h"
-#include "..\..\Minecraft.World\Container.h"
-#include "..\..\Minecraft.World\DispenserTileEntity.h"
-#include "..\..\Minecraft.World\SignTileEntity.h"
-#include "..\StatsCounter.h"
-#include "..\GameMode.h"
-#include "..\Xbox\Social\SocialManager.h"
-#include "Tutorial\TutorialMode.h"
+#include "../../Minecraft.World/net.minecraft.world.entity.item.h"
+#include "../../Minecraft.World/net.minecraft.world.entity.player.h"
+#include "../../Minecraft.World/net.minecraft.world.level.tile.entity.h"
+#include "../../Minecraft.World/net.minecraft.world.phys.h"
+#include "../../Minecraft.World/InputOutputStream.h"
+#include "../../Minecraft.World/compression.h"
+#include "../Options.h"
+#include "../MinecraftServer.h"
+#include "../MultiPlayerLevel.h"
+#include "../GameRenderer.h"
+#include "../ProgressRenderer.h"
+#include "../LevelRenderer.h"
+#include "../MobSkinMemTextureProcessor.h"
+#include "../Minecraft.h"
+#include "../ClientConnection.h"
+#include "../MultiPlayerLocalPlayer.h"
+#include "../LocalPlayer.h"
+#include "../../Minecraft.World/Player.h"
+#include "../../Minecraft.World/Inventory.h"
+#include "../../Minecraft.World/Level.h"
+#include "../../Minecraft.World/FurnaceTileEntity.h"
+#include "../../Minecraft.World/Container.h"
+#include "../../Minecraft.World/DispenserTileEntity.h"
+#include "../../Minecraft.World/SignTileEntity.h"
+#include "../StatsCounter.h"
+#include "../GameMode.h"
+#ifdef _LINUX64
+#include "../Linux64/Social/SocialManager.h"
+#else
+#include "../Xbox/Social/SocialManager.h"
+#endif
+#include "Tutorial/TutorialMode.h"
 #if defined _XBOX || defined _WINDOWS64
-#include "..\Xbox\XML\ATGXmlParser.h"
-#include "..\Xbox\XML\xmlFilesCallback.h"
+#include "../Xbox/XML/ATGXmlParser.h"
+#include "../Xbox/XML/xmlFilesCallback.h"
 #endif
 #include "Minecraft_Macros.h"
-#include "..\PlayerList.h"
-#include "..\ServerPlayer.h"
-#include "GameRules\ConsoleGameRules.h"
-#include "GameRules\ConsoleSchematicFile.h"
-#include "..\User.h"
-#include "..\..\Minecraft.World\LevelData.h"
-#include "..\..\Minecraft.World\net.minecraft.world.entity.player.h"
-#include "..\EntityRenderDispatcher.h"
-#include "..\..\Minecraft.World\compression.h"
-#include "..\TexturePackRepository.h"
-#include "..\DLCTexturePack.h"
-#include "DLC\DLCPack.h"
-#include "..\StringTable.h"
+#include "../PlayerList.h"
+#include "../ServerPlayer.h"
+#include "GameRules/ConsoleGameRules.h"
+#include "GameRules/ConsoleSchematicFile.h"
+#include "../User.h"
+#include "../../Minecraft.World/LevelData.h"
+#include "../../Minecraft.World/net.minecraft.world.entity.player.h"
+#include "../EntityRenderDispatcher.h"
+#include "../../Minecraft.World/compression.h"
+#include "../TexturePackRepository.h"
+#include "../DLCTexturePack.h"
+#include "DLC/DLCPack.h"
+#include "../StringTable.h"
 #ifndef _XBOX
-#include "..\ArchiveFile.h"
+#include "../ArchiveFile.h"
 #endif
-#include "..\Minecraft.h"
+#include "../Minecraft.h"
 #ifdef _XBOX
-#include "..\Xbox\GameConfig\Minecraft.spa.h"
-#include "..\Xbox\Network\NetworkPlayerXbox.h"
-#include "XUI\XUI_TextEntry.h"
-#include "XUI\XUI_XZP_Icons.h"
-#include "XUI\XUI_PauseMenu.h"
+#include "../Xbox/GameConfig/Minecraft.spa.h"
+#include "../Xbox/Network/NetworkPlayerXbox.h"
+#include "XUI/XUI_TextEntry.h"
+#include "XUI/XUI_XZP_Icons.h"
+#include "XUI/XUI_PauseMenu.h"
 #else
-#include "UI\UI.h"
-#include "UI\UIScene_PauseMenu.h"
+#include "UI/UI.h"
+#include "UI/UIScene_PauseMenu.h"
 #endif
 #ifdef __PS3__
 #include <sys/tty.h>
@@ -66,7 +70,7 @@
 #include <save_data_dialog.h>
 #endif
 
-#include "..\Common\Leaderboards\LeaderboardManager.h"
+#include "../Common/Leaderboards/LeaderboardManager.h"
 
 //CMinecraftApp app;
 unsigned int CMinecraftApp::m_uiLastSignInData = 0;
@@ -4412,6 +4416,8 @@ void CMinecraftApp::loadMediaArchive()
 	mediapath = L"Common\\Media\\MediaDurango.arc";
 #elif __PSVITA__
 	mediapath = L"Common\\Media\\MediaPSVita.arc";
+#elif _LINUX64
+	mediapath = L"Common/Media/MediaWindows64.arc";
 #endif
 
 	if (!mediapath.empty())
@@ -5556,7 +5562,7 @@ void CMinecraftApp::HandleDLC(DLCPack *pack)
 {
 	DWORD dwFilesProcessed = 0;
 #ifndef _XBOX
-#if defined(__PS3__) || defined(__ORBIS__) || defined(_WINDOWS64) || defined (__PSVITA__)
+#if defined(__PS3__) || defined(__ORBIS__) || defined(_WINDOWS64) || defined (__PSVITA__) || defined(_LINUX64)
 	std::vector<std::string> dlcFilenames;
 #elif defined _DURANGO
 	std::vector<std::wstring> dlcFilenames;
@@ -7090,6 +7096,13 @@ HRESULT CMinecraftApp::RegisterDLCData(eDLCContentType eType, WCHAR *pwchBannerN
 	app.DebugPrintf("DLCInfo - type - %d, productID - %ls, name - %ls , banner - %ls, iconfig - %d, sort index - %d\n",eType,pwchProductId, pwchProductName,pwchBannerName, iConfig, uiSortIndex);
 	return hr;
 }
+#elif defined(_LINUX64)
+
+HRESULT CMinecraftApp::RegisterDLCData(char *pchDLCName, unsigned int uiSortIndex, char *pchImageURL)
+{
+	(void)pchDLCName; (void)uiSortIndex; (void)pchImageURL;
+	return S_OK; // DLC not supported on Linux
+}
 #else
 
 HRESULT CMinecraftApp::RegisterDLCData(char *pchDLCName, unsigned int uiSortIndex,char *pchImageURL)
@@ -7108,7 +7121,6 @@ HRESULT CMinecraftApp::RegisterDLCData(char *pchDLCName, unsigned int uiSortInde
 	pDLCData->uiSortIndex=uiSortIndex;
 	pDLCData->eDLCType = app.GetDLCTypeFromName(pchDLCName);
 	strcpy(pDLCData->chImageURL,pchImageURL);
-	//bool bIsTrialDLC = app.GetTrialFromName(pchDLCName);
 
 	switch(pDLCData->eDLCType)
 	{
@@ -7132,12 +7144,6 @@ HRESULT CMinecraftApp::RegisterDLCData(char *pchDLCName, unsigned int uiSortInde
 
 	app.DebugPrintf(5,"Adding DLC - %s\n",pchDLCName);
 	DLCInfo[pchDLCName]=pDLCData;
-
-	// 	if(ullOfferID_Trial!=0ll) DLCInfo_Trial[ullOfferID_Trial]=pDLCData;
-	// 	if(ullOfferID_Full!=0ll) DLCInfo_Full[ullOfferID_Full]=pDLCData;
-	// 	if(pFirstSkin[0]!=0) DLCInfo_SkinName[pFirstSkin]=ullOfferID_Full;
-
-	//	DLCInfo[ullOfferID_Trial]=pDLCData;
 
 	return hr;
 }

@@ -1,6 +1,8 @@
 #pragma once
 
+#ifndef _LINUX64
 #include <d3d11.h>
+#endif
 
 class PostProcesser
 {

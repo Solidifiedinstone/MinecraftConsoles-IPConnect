@@ -14,7 +14,7 @@
 #include "net.minecraft.world.entity.player.h"
 #include "net.minecraft.world.entity.global.h"
 #include "Pig.h"
-#include "..\Minecraft.Client\Textures.h"
+#include "../Minecraft.Client/Textures.h"
 #include "MobCategory.h"
 
 
@@ -62,7 +62,9 @@ void Pig::newServerAiStep()
 
 bool Pig::canBeControlledByRider()
 {
-	shared_ptr<ItemInstance> item = dynamic_pointer_cast<Player>(rider.lock())->getCarriedItem();
+	auto p = dynamic_pointer_cast<Player>(rider.lock());
+	if (!p) return false;
+	shared_ptr<ItemInstance> item = p->getCarriedItem();
 
 	return item != NULL && item->id == Item::carrotOnAStick_Id;
 }
@@ -173,9 +175,9 @@ void Pig::thunderHit(const LightningBolt *lightningBolt)
 void Pig::causeFallDamage(float distance) 
 {
 	Animal::causeFallDamage(distance);
-	if ( (distance > 5) && rider.lock() != NULL && rider.lock()->instanceof(eTYPE_PLAYER) )
-	{
-		(dynamic_pointer_cast<Player>(rider.lock()))->awardStat(GenericStats::flyPig(),GenericStats::param_flyPig());
+	if ( distance > 5 ) {
+		auto rdr = dynamic_pointer_cast<Player>(rider.lock());
+		if (rdr) rdr->awardStat(GenericStats::flyPig(),GenericStats::param_flyPig());
 	}
 }
 

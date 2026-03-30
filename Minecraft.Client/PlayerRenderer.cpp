@@ -6,13 +6,13 @@
 #include "ModelPart.h"
 #include "LocalPlayer.h"
 #include "MultiPlayerLocalPlayer.h"
-#include "entityRenderDispatcher.h"
-#include "..\Minecraft.World\net.minecraft.world.entity.h"
-#include "..\Minecraft.World\net.minecraft.world.entity.player.h"
-#include "..\Minecraft.World\net.minecraft.world.item.h"
-#include "..\Minecraft.World\net.minecraft.world.level.tile.h"
-#include "..\Minecraft.World\net.minecraft.h"
-#include "..\Minecraft.World\StringHelpers.h"
+#include "EntityRenderDispatcher.h"
+#include "../Minecraft.World/net.minecraft.world.entity.h"
+#include "../Minecraft.World/net.minecraft.world.entity.player.h"
+#include "../Minecraft.World/net.minecraft.world.item.h"
+#include "../Minecraft.World/net.minecraft.world.level.tile.h"
+#include "../Minecraft.World/net.minecraft.h"
+#include "../Minecraft.World/StringHelpers.h"
 
 static unsigned int nametagColorForIndex(int index)
 {
@@ -322,9 +322,9 @@ void PlayerRenderer::additionalRendering(shared_ptr<LivingEntity> _mob, float a)
     }
 
 	// 4J: removed
-	/*boolean loaded = mob->getCloakTexture()->isLoaded();
-    boolean b1 = !mob->isInvisible();
-    boolean b2 = !mob->isCapeHidden();*/
+	/*bool loaded = mob->getCloakTexture()->isLoaded();
+    bool b1 = !mob->isInvisible();
+    bool b2 = !mob->isCapeHidden();*/
 	if (bindTexture(mob->customTextureUrl2, L"") && !mob->isInvisible())
 	{
         glPushMatrix();

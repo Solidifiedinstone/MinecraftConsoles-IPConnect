@@ -5,7 +5,7 @@
 #include "TexturePackRepository.h"
 #include "Minecraft.h"
 #include "TextureManager.h"
-#include "..\Minecraft.World\StringHelpers.h"
+#include "../Minecraft.World/StringHelpers.h"
 
 TextureManager *TextureManager::instance = NULL;
 
@@ -120,6 +120,7 @@ vector<Texture *> *TextureManager::createTextures(const wstring &filename, bool 
 
 	BufferedImage *image = texturePack->getImageResource(filename, false, true, drive);
 	MemSect(0);
+	if (!image) return result;
 	int height = image->getHeight();
 	int width = image->getWidth();
 

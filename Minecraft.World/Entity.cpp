@@ -18,12 +18,12 @@
 #include "EntityPos.h"
 #include "Entity.h"
 #include "SoundTypes.h"
-#include "..\minecraft.Client\HumanoidModel.h"
-#include "..\Minecraft.Client\MinecraftServer.h"
-#include "..\Minecraft.Client\MultiPlayerLevel.h"
-#include "..\Minecraft.Client\MultiplayerLocalPlayer.h"
-#include "..\Minecraft.Client\ServerLevel.h"
-#include "..\Minecraft.Client\PlayerList.h"
+#include "../Minecraft.Client/HumanoidModel.h"
+#include "../Minecraft.Client/MinecraftServer.h"
+#include "../Minecraft.Client/MultiPlayerLevel.h"
+#include "../Minecraft.Client/MultiPlayerLocalPlayer.h"
+#include "../Minecraft.Client/ServerLevel.h"
+#include "../Minecraft.Client/PlayerList.h"
 
 const wstring Entity::RIDING_TAG = L"Riding";
 
@@ -456,12 +456,9 @@ void Entity::setRot(float yRot, float xRot)
 	C++ Cannot do mod of non-integral type
 	*/
 
-	while( yRot >= 360.0f )
-		yRot -= 360.0f;
-	while( yRot < 0 )
-		yRot += 360.0f;
-	while( xRot >= 360.0f )
-		xRot -= 360.0f;
+	yRot = fmodf(yRot, 360.0f);
+	if (yRot < 0) yRot += 360.0f;
+	xRot = fmodf(xRot, 360.0f);
 
 	this->yRot = yRot;
 	this->xRot = xRot;
