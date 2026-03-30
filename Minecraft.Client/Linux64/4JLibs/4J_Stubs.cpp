@@ -730,9 +730,6 @@ void C4JRender::DrawVertices(ePrimitiveType PrimitiveType, int count, void *data
     call.bytes.resize(bytes);
     memcpy(call.bytes.data(), dataIn, bytes);
     ensureSoftMatrices();
-    call.hasMatrices = true;
-    memcpy(call.modelview, tl_softMatrices.model, sizeof(call.modelview));
-    memcpy(call.projection, tl_softMatrices.proj, sizeof(call.projection));
     call.textureId = tl_currentTexture;
     call.useVertexColor = tl_nextDrawHasVertexColor;
     tl_nextDrawHasVertexColor = true; // reset for next draw
@@ -741,9 +738,17 @@ void C4JRender::DrawVertices(ePrimitiveType PrimitiveType, int count, void *data
 
     if (tl_recordingCbuff >= 0)
     {
+        // Recording into a command buffer — capture the matrix for later replay.
+        call.hasMatrices = true;
+        memcpy(call.modelview, tl_softMatrices.model, sizeof(call.modelview));
+        memcpy(call.projection, tl_softMatrices.proj, sizeof(call.projection));
         tl_recordingCalls.push_back(std::move(call));
         return;
     }
+
+    // Immediate draw: the GL matrix stack is already correct (set by MatrixTranslate/
+    // MatrixRotate/etc which update both software AND GL matrices). Don't re-apply.
+    call.hasMatrices = false;
 
     if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread)
         return;
