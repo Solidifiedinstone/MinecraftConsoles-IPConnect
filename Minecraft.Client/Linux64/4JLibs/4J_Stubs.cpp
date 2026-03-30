@@ -388,7 +388,11 @@ static void executeDraw(const DrawCall &call)
     mcglDisable(0x0B50); // GL_LIGHTING
     mcglDisable(0x4000); // GL_LIGHT0
     mcglDisable(0x4001); // GL_LIGHT1
-    mcglColor4ub(255, 255, 255, 255);
+    // When useVertexColor is false AND texturing is off, preserve the
+    // current GL color state (e.g. sky color set by glColor3f).
+    // Otherwise reset to white so per-vertex colors or textures aren't tinted.
+    if (call.useVertexColor || g_textureEnabled)
+        mcglColor4ub(255, 255, 255, 255);
 
     int effectiveTextureId = call.textureId;
     if (effectiveTextureId <= 0)
