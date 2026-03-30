@@ -44,3 +44,4 @@ void mcglFogf(unsigned int pname, float value);
 void mcglFogfv(unsigned int pname, const float *params);
 void mcglLightfv(unsigned int light, unsigned int pname, const float *params);
 void mcglLightModelfv(unsigned int pname, const float *params);
+void mcglShadeModel(unsigned int mode);

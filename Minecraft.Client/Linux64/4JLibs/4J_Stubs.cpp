@@ -59,6 +59,7 @@ struct DrawCall
     C4JRender::eVertexType vtype;
     std::vector<unsigned char> bytes;
     bool hasMatrices = false;
+    bool useVertexColor = true; // false = use current GL color state, not per-vertex
     float modelview[16];
     float projection[16];
     int textureId = -1;
@@ -76,6 +77,7 @@ std::thread::id g_renderThread;
 float g_clearRGBA[4] = {0.0f, 0.0f, 0.0f, 1.0f};
 int g_textureLevels = 1;
 int g_currentTexture = -1;
+bool g_textureEnabled = true; // tracks glEnable/glDisable(GL_TEXTURE_2D) state
 int g_nextTextureId = 1;
 int g_nextCBuffId = 1;
 std::unordered_map<int, TextureInfo> g_textures;
@@ -84,6 +86,7 @@ std::mutex g_cbuffMutex;
 thread_local int tl_recordingCbuff = -1;
 thread_local std::vector<DrawCall> tl_recordingCalls;
 thread_local int tl_currentTexture = -1;
+thread_local bool tl_nextDrawHasVertexColor = true; // set by Tesselator before DrawVertices
 thread_local float tl_globalUV[2] = {0.0f, 0.0f};
 std::atomic<int> g_sharedTextureId(-1);
 std::atomic<float> g_sharedUVU(0.0f);
@@ -387,24 +390,33 @@ static void executeDraw(const DrawCall &call)
     mcglDisable(0x4001); // GL_LIGHT1
     mcglColor4ub(255, 255, 255, 255);
 
-    int effectiveTextureId = call.textureId;
-    if (effectiveTextureId <= 0)
+    // Respect glDisable(GL_TEXTURE_2D) — don't re-enable textures from recorded draws.
+    if (g_textureEnabled)
     {
-        if (g_currentTexture > 0)
-            effectiveTextureId = g_currentTexture;
-        else if (tl_currentTexture > 0)
-            effectiveTextureId = tl_currentTexture;
-        else
-            effectiveTextureId = g_sharedTextureId.load(std::memory_order_relaxed);
-    }
-
-    if (effectiveTextureId > 0)
-    {
-        auto it = g_textures.find(effectiveTextureId);
-        if (it != g_textures.end())
+        int effectiveTextureId = call.textureId;
+        if (effectiveTextureId <= 0)
         {
-            mcglEnable(0x0DE1); // GL_TEXTURE_2D
-            mcglBindTexture(0x0DE1, it->second.glId);
+            if (g_currentTexture > 0)
+                effectiveTextureId = g_currentTexture;
+            else if (tl_currentTexture > 0)
+                effectiveTextureId = tl_currentTexture;
+            else
+                effectiveTextureId = g_sharedTextureId.load(std::memory_order_relaxed);
+        }
+
+        if (effectiveTextureId > 0)
+        {
+            auto it = g_textures.find(effectiveTextureId);
+            if (it != g_textures.end())
+            {
+                mcglEnable(0x0DE1); // GL_TEXTURE_2D
+                mcglBindTexture(0x0DE1, it->second.glId);
+            }
+            else
+            {
+                mcglDisable(0x0DE1); // GL_TEXTURE_2D
+                mcglBindTexture(0x0DE1, 0);
+            }
         }
         else
         {
@@ -448,9 +460,12 @@ static void executeDraw(const DrawCall &call)
             const float t = (float)s[5] / 8192.0f;
             const unsigned short packed = (unsigned short)(((int)s[3] + 32768) & 0xFFFF);
 
-            unsigned char r = 255, g = 255, b = 255;
-            decode565(packed, r, g, b);
-            mcglColor4ub(r, g, b, 255);
+            if (call.useVertexColor)
+            {
+                unsigned char r = 255, g = 255, b = 255;
+                decode565(packed, r, g, b);
+                mcglColor4ub(r, g, b, 255);
+            }
             mcglTexCoord2f(u, t);
             mcglVertex3f(x, y, z);
         };
@@ -484,12 +499,15 @@ static void executeDraw(const DrawCall &call)
             const float z = *reinterpret_cast<const float *>(&s[2]);
             float u = *reinterpret_cast<const float *>(&s[3]);
             float t = *reinterpret_cast<const float *>(&s[4]);
-            const uint32_t c = s[5];
-            // Tesselator packs color as 0xRRGGBBAA.
-            mcglColor4ub((c >> 24) & 0xFF,
-                         (c >> 16) & 0xFF,
-                         (c >> 8) & 0xFF,
-                         c & 0xFF);
+            if (call.useVertexColor)
+            {
+                const uint32_t c = s[5];
+                // Tesselator packs color as 0xRRGGBBAA.
+                mcglColor4ub((c >> 24) & 0xFF,
+                             (c >> 16) & 0xFF,
+                             (c >> 8) & 0xFF,
+                             c & 0xFF);
+            }
             mcglTexCoord2f(u, t);
             mcglVertex3f(x, y, z);
         };
@@ -716,6 +734,8 @@ void C4JRender::DrawVertices(ePrimitiveType PrimitiveType, int count, void *data
     memcpy(call.modelview, tl_softMatrices.model, sizeof(call.modelview));
     memcpy(call.projection, tl_softMatrices.proj, sizeof(call.projection));
     call.textureId = tl_currentTexture;
+    call.useVertexColor = tl_nextDrawHasVertexColor;
+    tl_nextDrawHasVertexColor = true; // reset for next draw
     call.globalUV[0] = g_sharedUVU.load(std::memory_order_relaxed);
     call.globalUV[1] = g_sharedUVV.load(std::memory_order_relaxed);
 
@@ -841,10 +861,18 @@ void C4JRender::TextureBind(int idx)
     tl_currentTexture = (idx > 0) ? idx : -1;
     g_sharedTextureId.store(tl_currentTexture, std::memory_order_relaxed);
     if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    if (idx <= 0) { g_currentTexture = -1; mcglDisable(0x0DE1); mcglBindTexture(0x0DE1, 0); return; }
+    if (idx <= 0)
+    {
+        g_currentTexture = -1;
+        g_textureEnabled = false;
+        mcglDisable(0x0DE1); // GL_TEXTURE_2D
+        mcglBindTexture(0x0DE1, 0);
+        return;
+    }
     auto it = g_textures.find(idx);
     if (it == g_textures.end()) return;
     g_currentTexture = idx;
+    g_textureEnabled = true;
     mcglEnable(0x0DE1); // GL_TEXTURE_2D
     mcglBindTexture(0x0DE1, it->second.glId);
 }
@@ -1166,6 +1194,8 @@ void C4JRender::StateSetDepthSlopeAndBias(float slope, float bias)
     if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
     if (slope != 0.0f || bias != 0.0f) { mcglEnable(0x8037); mcglPolygonOffset(slope, bias); } else mcglDisable(0x8037);
 }
+void C4JRender::SetNextDrawVertexColor(bool hasColor) { tl_nextDrawHasVertexColor = hasColor; }
+void C4JRender::StateSetTextureEnable(bool enable) { g_textureEnabled = enable; if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return; if (enable) mcglEnable(0x0DE1); else { mcglDisable(0x0DE1); mcglBindTexture(0x0DE1, 0); } }
 void C4JRender::StateSetFogEnable(bool enable) { if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return; if (enable) mcglEnable(0x0B60); else mcglDisable(0x0B60); }
 void C4JRender::StateSetFogMode(int mode) { if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) mcglFogi(0x0B65, (mode == GL_EXP) ? 0x0800 : 0x2601); }
 void C4JRender::StateSetFogNearDistance(float dist) { if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) mcglFogf(0x0B63, dist); }

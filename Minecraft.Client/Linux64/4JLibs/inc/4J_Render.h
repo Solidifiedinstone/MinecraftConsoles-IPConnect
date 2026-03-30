@@ -175,6 +175,8 @@ public:
 	void StateSetDepthTestEnable(bool enable);
 	void StateSetAlphaTestEnable(bool enable);
 	void StateSetDepthSlopeAndBias(float slope, float bias);
+	void StateSetTextureEnable(bool enable);
+	void SetNextDrawVertexColor(bool hasColor);
 	void StateSetFogEnable(bool enable);
 	void StateSetFogMode(int mode);
 	void StateSetFogNearDistance(float dist);

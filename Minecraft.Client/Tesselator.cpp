@@ -105,9 +105,15 @@ void Tesselator::end()
 	{
 		// 4J - a lot of stuff taken out here for fiddling round with enable client states etc.
 		// that don't matter for our renderer
+		// Tell the renderer whether this draw has per-vertex color.
+		// When false, the current GL color state (e.g. from glColor3f) is preserved.
+		RenderManager.SetNextDrawVertexColor(hasColor);
+
         if (!hasColor)
 		{
-			// 4J - TEMP put in fixed vertex colors if we don't have any, until we have a shader that can cope without them
+			// Bake white so the vertex data slot is not garbage (prevents rendering artifacts
+			// if the renderer reads it anyway), but the draw flag above prevents it from
+			// overriding the GL color state.
 			unsigned int *pColData = (unsigned int *)_array->data;
 			pColData += 5;
 			for( int i = 0; i < vertices; i++ )
@@ -116,7 +122,6 @@ void Tesselator::end()
 				pColData += 8;
 			}
 #ifdef __PSVITA__
-			// AP - alpha cut out is expensive on vita. Check both counts for valid vertices
 			pColData = (unsigned int *)_array2->data;
 			pColData += 5;
 			for( int i = 0; i < vertices2; i++ )

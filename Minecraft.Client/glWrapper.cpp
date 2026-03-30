@@ -188,7 +188,7 @@ void glDisable(int state)
 	switch(state)
 	{
 		case GL_TEXTURE_2D:
-			RenderManager.TextureBind(-1);
+			RenderManager.StateSetTextureEnable(false);
 			break;
 		case GL_BLEND:
 			RenderManager.StateSetBlendEnable(false);
@@ -221,6 +221,9 @@ void glEnable(int state)
 {
 	switch(state)
 	{
+		case GL_TEXTURE_2D:
+			RenderManager.StateSetTextureEnable(true);
+			break;
 		case GL_BLEND:
 			RenderManager.StateSetBlendEnable(true);
 			break;
