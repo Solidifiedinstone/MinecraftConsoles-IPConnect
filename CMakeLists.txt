@@ -61,6 +61,7 @@ if(UNIX AND NOT APPLE)
     # SentientManager stubs already in Extrax64Stubs.cpp
     # DynamicConfigurations stubs already in Extrax64Stubs.cpp
     # SocialManager stubs already in Extrax64Stubs.cpp
+    "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Linux64/SessionLog.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Linux64/Linux64_UIStubs.cpp"
   )
 endif()

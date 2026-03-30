@@ -29,6 +29,7 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 #include "gl_api.h"
+#include "../SessionLog.h"
 
 /* ====================================================================
  * Global singleton instances
@@ -287,7 +288,7 @@ static void softFrustum(float left, float right, float bottom, float top, float 
 
 static void onGlfwError(int code, const char *desc)
 {
-    std::fprintf(stderr, "[linuxgl] GLFW error %d: %s\n", code, desc ? desc : "(null)");
+    SessionLog_Printf("[linuxgl] GLFW error %d: %s\n", code, desc ? desc : "(null)");
 }
 
 static std::mutex g_initMutex;
@@ -306,7 +307,7 @@ static bool ensureGLReady()
         glfwSetErrorCallback(onGlfwError);
         if (!glfwInit())
         {
-            std::fprintf(stderr, "[linuxgl] glfwInit failed\n");
+            SessionLog_Printf("[linuxgl] glfwInit failed\n");
             return false;
         }
         glfwInitDone = true;
@@ -331,7 +332,7 @@ static bool ensureGLReady()
         g_window = glfwCreateWindow(800, 600, "Minecraft Console Edition", nullptr, nullptr);
     if (!g_window)
     {
-        std::fprintf(stderr, "[linuxgl] failed to create GLFW window\n");
+        SessionLog_Printf("[linuxgl] failed to create GLFW window\n");
         return false;
     }
 
@@ -535,6 +536,11 @@ void C4JRender::Tick()
     if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread)
         return;
     glfwPollEvents();
+    if (glfwWindowShouldClose(g_window))
+    {
+        app.m_bShutdown = true;
+        return;
+    }
     updateWindowSize();
 }
 void C4JRender::UpdateGamma(unsigned short /*usGamma*/) {}

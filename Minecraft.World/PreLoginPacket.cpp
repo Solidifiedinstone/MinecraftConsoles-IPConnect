@@ -50,7 +50,9 @@ PreLoginPacket::PreLoginPacket(wstring userName, PlayerUID *playerXuids, DWORD p
 
 PreLoginPacket::~PreLoginPacket()
 {
-	if( m_playerXuids != NULL ) delete [] m_playerXuids;
+	if( m_playerXuids != NULL && m_dwPlayerCount > 0 && m_dwPlayerCount <= 256 )
+		delete [] m_playerXuids;
+	m_playerXuids = NULL;
 }
 
 void PreLoginPacket::read(DataInputStream *dis) //throws IOException 

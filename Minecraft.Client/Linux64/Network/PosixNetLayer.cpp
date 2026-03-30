@@ -24,6 +24,7 @@
 #include <string.h>
 #include <poll.h>
 #include <time.h>
+#include "../SessionLog.h"
 
 // ============================================================================
 // Helper: receive exactly len bytes, returns false on disconnect/error
@@ -283,7 +284,7 @@ bool WinsockNetLayer::HostGame(int port, const char* bindIp)
 // ============================================================================
 bool WinsockNetLayer::JoinGame(const char* ip, int port)
 {
-    fprintf(stderr, "[PosixNetLayer] JoinGame called: %s:%d\n", ip, port);
+    SessionLog_Printf("[PosixNetLayer] JoinGame called: %s:%d\n", ip, port);
     if (!s_initialized && !Initialize()) return false;
 
     s_isHost = false;
@@ -385,7 +386,7 @@ bool WinsockNetLayer::JoinGame(const char* ip, int port)
     }
     s_localSmallId = assignedSmallId;
 
-    fprintf(stderr, "[PosixNetLayer] Connected to %s:%d, assigned smallId=%d\n", ip, port, s_localSmallId);
+    SessionLog_Printf("[PosixNetLayer] Connected to %s:%d, assigned smallId=%d\n", ip, port, s_localSmallId);
     app.DebugPrintf("Linux LAN: Connected to %s:%d, assigned smallId=%d\n", ip, port, s_localSmallId);
 
     s_active = true;
@@ -452,12 +453,12 @@ bool WinsockNetLayer::SendToSmallId(uint8_t targetSmallId, const void* data, int
     {
         int sock = GetSocketForSmallId(targetSmallId);
         if (sock == -1) return false;
-        fprintf(stderr, "[PosixNetLayer] SendToSmallId host->%d: %d bytes\n", targetSmallId, dataSize);
+        SessionLog_Printf("[PosixNetLayer] SendToSmallId host->%d: %d bytes\n", targetSmallId, dataSize);
         return SendOnSocket(sock, data, dataSize);
     }
     else
     {
-        fprintf(stderr, "[PosixNetLayer] SendToSmallId client->host: %d bytes\n", dataSize);
+        SessionLog_Printf("[PosixNetLayer] SendToSmallId client->host: %d bytes\n", dataSize);
         return SendOnSocket(s_hostConnectionSocket, data, dataSize);
     }
 }

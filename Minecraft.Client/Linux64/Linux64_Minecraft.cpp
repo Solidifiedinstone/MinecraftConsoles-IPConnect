@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <climits>
 
+#include "SessionLog.h"
 #include "GameConfig/Minecraft.spa.h"
 #include "../MinecraftServer.h"
 #include "../LocalPlayer.h"
@@ -82,8 +83,11 @@ void UpdateAspectRatio(int width, int height)
 //--------------------------------------------------------------------------------------
 // Signal handler for graceful shutdown
 //--------------------------------------------------------------------------------------
+static volatile sig_atomic_t g_signalReceived = 0;
+
 static void SignalHandler(int signum)
 {
+	g_signalReceived = signum;
 	app.m_bShutdown = true;
 	MinecraftServer::HaltServer();
 }
@@ -448,6 +452,10 @@ int main(int argc, char* argv[])
 		}
 	}
 
+	// Initialise session log file (creates logs/ directory)
+	SessionLog_Init();
+	atexit(SessionLog_Shutdown);
+
 	// Load username from file
 	LoadUsernameFromFile();
 
@@ -472,7 +480,8 @@ int main(int argc, char* argv[])
 	Minecraft* pMinecraft = InitialiseMinecraftRuntime();
 	if (pMinecraft == NULL)
 	{
-		fprintf(stderr, "Failed to initialise the Minecraft runtime.\n");
+		SessionLog_Printf("Failed to initialise the Minecraft runtime.\n");
+		SessionLog_Shutdown();
 		return 1;
 	}
 
@@ -531,5 +540,10 @@ int main(int argc, char* argv[])
 		usleep(1000); // 1ms
 	}
 
+	if (g_signalReceived)
+		SessionLog_Printf("Shutdown triggered by signal %d\n", (int)g_signalReceived);
+	else
+		SessionLog_Printf("Shutdown: game loop exited normally\n");
+	SessionLog_Shutdown();
 	return 0;
 }
