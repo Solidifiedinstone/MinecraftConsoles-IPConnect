@@ -844,11 +844,13 @@ int C4JRender::TextureCreate()
     // Set non-mipmap filters so the texture is complete even without mipmap levels.
     // Default GL min filter is GL_NEAREST_MIPMAP_LINEAR which makes textures without
     // mipmaps sample as white (incomplete texture).
-    mcglBindTexture(0x0DE1, glTex);
-    mcglTexParameteri(0x0DE1, 0x2801, 0x2600); // GL_TEXTURE_MIN_FILTER = GL_NEAREST
-    mcglTexParameteri(0x0DE1, 0x2800, 0x2600); // GL_TEXTURE_MAG_FILTER = GL_NEAREST
     int id = g_nextTextureId++;
     g_textures[id].glId = glTex;
+    // Bind through our own API so g_currentTexture is set — TextureData
+    // checks g_currentTexture and silently skips upload if it's <= 0.
+    TextureBind(id);
+    mcglTexParameteri(0x0DE1, 0x2801, 0x2600); // GL_TEXTURE_MIN_FILTER = GL_NEAREST
+    mcglTexParameteri(0x0DE1, 0x2800, 0x2600); // GL_TEXTURE_MAG_FILTER = GL_NEAREST
     return id;
 }
 

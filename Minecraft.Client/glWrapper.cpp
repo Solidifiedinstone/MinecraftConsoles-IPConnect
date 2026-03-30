@@ -8,8 +8,9 @@
 
 void glViewport(int x, int y, int w, int h)
 {
-	if (w > 0 && h > 0)
-		mcglViewport(x, y, w, h);
+	// Use actual framebuffer size, not game's internal resolution.
+	extern int g_iScreenWidth, g_iScreenHeight;
+	mcglViewport(0, 0, g_iScreenWidth, g_iScreenHeight);
 }
 
 void glTranslatef(float x,float y,float z)
