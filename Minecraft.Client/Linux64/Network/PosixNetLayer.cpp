@@ -217,7 +217,7 @@ bool WinsockNetLayer::HostGame(int port, const char* bindIp)
     struct addrinfo hints = {};
     struct addrinfo* result = NULL;
 
-    hints.ai_family = AF_INET;
+    hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
     hints.ai_flags = (bindIp == NULL || bindIp[0] == 0) ? AI_PASSIVE : 0;
@@ -300,7 +300,7 @@ bool WinsockNetLayer::JoinGame(const char* ip, int port)
     struct addrinfo hints = {};
     struct addrinfo* result = NULL;
 
-    hints.ai_family = AF_INET;
+    hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
 
