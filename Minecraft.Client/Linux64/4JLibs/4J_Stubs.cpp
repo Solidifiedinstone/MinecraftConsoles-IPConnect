@@ -315,6 +315,10 @@ static bool ensureGLReady()
     glfwDefaultWindowHints();
     glfwWindowHint(GLFW_VISIBLE, GLFW_TRUE);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+    // Request compat profile for fixed-function GL (glBegin/End, matrix stack, lighting, fog).
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_ANY_PROFILE);
     int w = (g_iScreenWidth > 0) ? g_iScreenWidth : 1280;
     int h = (g_iScreenHeight > 0) ? g_iScreenHeight : 720;
     if (w < 640) w = 640;
@@ -537,9 +541,15 @@ void C4JRender::UpdateGamma(unsigned short /*usGamma*/) {}
 void C4JRender::StartFrame()
 {
     if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    // Force sane baseline state each frame; bad legacy state leaks can black out all draws.
+    // Force sane baseline state each frame to prevent inter-frame state leaks.
     mcglColorMask(1, 1, 1, 1);
+    mcglDepthMask(1);
     mcglDisable(0x0C11); // GL_SCISSOR_TEST
+    mcglDisable(0x0BE2); // GL_BLEND
+    mcglEnable(0x0B71);  // GL_DEPTH_TEST
+    mcglDepthFunc(0x0203); // GL_LEQUAL
+    mcglAlphaFunc(0x0204, 0.1f); // GL_GREATER, 0.1f
+    mcglBlendFunc(0x0302, 0x0303); // GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA
 }
 void C4JRender::Present()
 {
