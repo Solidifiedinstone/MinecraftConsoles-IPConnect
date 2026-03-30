@@ -2,10 +2,14 @@
 #include "../Minecraft.World/FloatBuffer.h"
 #include "../Minecraft.World/IntBuffer.h"
 #include "../Minecraft.World/ByteBuffer.h"
+#ifdef _LINUX64
+#include "Linux64/4JLibs/gl_api.h"
+#endif
 
 void glViewport(int x, int y, int w, int h)
 {
-	// We don't really need anything here because minecraft doesn't current do anything other than the default viewport
+	if (w > 0 && h > 0)
+		mcglViewport(x, y, w, h);
 }
 
 void glTranslatef(float x,float y,float z)
