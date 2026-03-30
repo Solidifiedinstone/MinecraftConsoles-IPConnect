@@ -928,10 +928,9 @@ void GameRenderer::updateLightTexture(float a)
 
 #if ( defined _DURANGO || defined _WIN64 || __PSVITA__ )
             lightPixels[j][i] = alpha << 24 | b << 16 | g << 8 | r;
-#elif ( defined _XBOX || defined __ORBIS__ )
-            lightPixels[j][i] = alpha << 24 | r << 16 | g << 8 | b;
 #else
-            lightPixels[j][i] = r << 24 | g << 16 | b << 8 | alpha;
+            // ARGB int format expected by replaceTextureDirect (extracts A>>24, R>>16, G>>8, B>>0)
+            lightPixels[j][i] = alpha << 24 | r << 16 | g << 8 | b;
 #endif
         }
 
