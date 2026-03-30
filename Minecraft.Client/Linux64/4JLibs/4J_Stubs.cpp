@@ -388,12 +388,7 @@ static void executeDraw(const DrawCall &call)
     mcglDisable(0x0B50); // GL_LIGHTING
     mcglDisable(0x4000); // GL_LIGHT0
     mcglDisable(0x4001); // GL_LIGHT1
-    // When useVertexColor is false AND texturing is off, preserve the
-    // current GL color state (e.g. sky color set by glColor3f).
-    // Otherwise reset to white so per-vertex colors or textures aren't tinted.
-    if (call.useVertexColor || g_textureEnabled)
-        mcglColor4ub(255, 255, 255, 255);
-
+    // Resolve which texture to use for this draw.
     int effectiveTextureId = call.textureId;
     if (effectiveTextureId <= 0)
     {
@@ -405,23 +400,27 @@ static void executeDraw(const DrawCall &call)
             effectiveTextureId = g_sharedTextureId.load(std::memory_order_relaxed);
     }
 
-    if (g_textureEnabled && effectiveTextureId > 0)
+    bool drawTextured = false;
+    if (effectiveTextureId > 0)
     {
         auto it = g_textures.find(effectiveTextureId);
         if (it != g_textures.end())
         {
             mcglEnable(0x0DE1); // GL_TEXTURE_2D
             mcglBindTexture(0x0DE1, it->second.glId);
-        }
-        else
-        {
-            mcglDisable(0x0DE1); // GL_TEXTURE_2D
+            drawTextured = true;
         }
     }
-    else
+    if (!drawTextured)
     {
         mcglDisable(0x0DE1); // GL_TEXTURE_2D
     }
+
+    // Reset color to white for textured/vertex-colored draws.
+    // For untextured draws without per-vertex color (sky), preserve
+    // the current GL color state (set by glColor3f before glCallList).
+    if (call.useVertexColor || drawTextured)
+        mcglColor4ub(255, 255, 255, 255);
 
     if (call.hasMatrices)
     {
@@ -813,15 +812,18 @@ bool C4JRender::CBuffCall(int index, bool /*full*/)
     for (const DrawCall &src : local)
     {
         DrawCall c = src;
-        // Command-buffer playback should preserve bound texture state across draws.
-        // Some recorded draws do not carry an explicit texture id and rely on prior bind.
-        if (c.textureId > 0)
+        if (g_textureEnabled)
         {
-            replayTextureId = c.textureId;
+            // Textured replay: resolve texture from recorded or current state.
+            if (c.textureId > 0)
+                replayTextureId = c.textureId;
+            else if (replayTextureId > 0)
+                c.textureId = replayTextureId;
         }
-        else if (replayTextureId > 0)
+        else
         {
-            c.textureId = replayTextureId;
+            // Untextured replay (sky, lines): force texture off.
+            c.textureId = -1;
         }
         executeDraw(c);
     }
@@ -839,6 +841,12 @@ int C4JRender::TextureCreate()
     unsigned int glTex = 0;
     mcglGenTextures(1, &glTex);
     if (glTex == 0) return 0;
+    // Set non-mipmap filters so the texture is complete even without mipmap levels.
+    // Default GL min filter is GL_NEAREST_MIPMAP_LINEAR which makes textures without
+    // mipmaps sample as white (incomplete texture).
+    mcglBindTexture(0x0DE1, glTex);
+    mcglTexParameteri(0x0DE1, 0x2801, 0x2600); // GL_TEXTURE_MIN_FILTER = GL_NEAREST
+    mcglTexParameteri(0x0DE1, 0x2800, 0x2600); // GL_TEXTURE_MAG_FILTER = GL_NEAREST
     int id = g_nextTextureId++;
     g_textures[id].glId = glTex;
     return id;
@@ -879,14 +887,15 @@ void C4JRender::TextureData(int width, int height, void *data, int level, eTextu
 {
     if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
     if (g_currentTexture <= 0 || !data || width <= 0 || height <= 0) return;
-    // Keep upload in RGBA order for desktop GL fixed-function sampling.
-    mcglTexImage2D(0x0DE1, level, 0x1908, width, height, 0, 0x1908, 0x1401, data); // GL_RGBA/UNSIGNED_BYTE
+    // Pixels are 32-bit ARGB ints (0xAARRGGBB). On little-endian, memory order is BB GG RR AA.
+    // GL_BGRA + GL_UNSIGNED_BYTE reads bytes as B G R A which maps correctly.
+    mcglTexImage2D(0x0DE1, level, 0x1908, width, height, 0, 0x80E1, 0x1401, data); // internal=GL_RGBA, format=GL_BGRA, type=GL_UNSIGNED_BYTE
 }
 void C4JRender::TextureDataUpdate(int xoffset, int yoffset, int width, int height, void *data, int level)
 {
     if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
     if (g_currentTexture <= 0 || !data || width <= 0 || height <= 0) return;
-    mcglTexSubImage2D(0x0DE1, level, xoffset, yoffset, width, height, 0x1908, 0x1401, data); // GL_RGBA
+    mcglTexSubImage2D(0x0DE1, level, xoffset, yoffset, width, height, 0x80E1, 0x1401, data); // GL_BGRA
 }
 void C4JRender::TextureSetParam(int param, int value)
 {
