@@ -10,6 +10,7 @@
 #define VMA_IMPLEMENTATION
 #include "vk_backend.h"
 #include "vk_pipeline.h"
+#include "vk_texture.h"
 #include "../SessionLog.h"
 
 #include <cstring>
@@ -410,6 +411,7 @@ void vkb_cleanup()
 {
     if (!g_vk.device) return;
     vkDeviceWaitIdle(g_vk.device);
+    vkt_cleanup();
     vkp_cleanup();
 
     for (int i = 0; i < VKB_MAX_FRAMES_IN_FLIGHT; i++)

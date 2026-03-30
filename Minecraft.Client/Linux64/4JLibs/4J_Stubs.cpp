@@ -31,6 +31,7 @@
 #include "gl_api.h"
 #include "vk_backend.h"
 #include "vk_pipeline.h"
+#include "vk_texture.h"
 #include "../SessionLog.h"
 
 /* ====================================================================
@@ -415,7 +416,15 @@ static void executeDraw(const DrawCall &call)
     VkPushConstants pc = {};
     memcpy(pc.mvp, mvp, 64);
     pc.globalColor[0] = pc.globalColor[1] = pc.globalColor[2] = pc.globalColor[3] = 1.0f;
-    pc.textureEnable  = 0.0f; // TODO: Phase 4 textures
+    // Resolve texture
+    int effectiveTextureId = call.textureId;
+    if (effectiveTextureId <= 0)
+    {
+        if (g_currentTexture > 0) effectiveTextureId = g_currentTexture;
+        else if (tl_currentTexture > 0) effectiveTextureId = tl_currentTexture;
+        else effectiveTextureId = g_sharedTextureId.load(std::memory_order_relaxed);
+    }
+    pc.textureEnable = (g_textureEnabled && effectiveTextureId > 0) ? 1.0f : 0.0f;
     pc.fogEnable      = 0.0f; // TODO: Phase 5 fog
     pc.alphaTestEnable = 0.0f;
     pc.alphaRef       = 0.1f;
@@ -534,9 +543,12 @@ static void executeDraw(const DrawCall &call)
         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
         0, sizeof(VkPushConstants), &pc);
 
-    // Bind white fallback texture (Phase 4 will bind real textures)
+    // Bind texture descriptor
+    VkDescriptorSet texDesc = (effectiveTextureId > 0)
+        ? vkt_get_descriptor(effectiveTextureId)
+        : g_pipe.whiteTexDescSet;
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-        g_pipe.pipelineLayout, 0, 1, &g_pipe.whiteTexDescSet, 0, nullptr);
+        g_pipe.pipelineLayout, 0, 1, &texDesc, 0, nullptr);
 
     // ── Bind vertex buffer and draw ──
     VkBuffer vb = g_vk.stagingBuffer[g_vk.currentFrame];
@@ -845,49 +857,24 @@ void C4JRender::CBuffDeferredModeEnd() {}
 int C4JRender::TextureCreate()
 {
     if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return 0;
-    unsigned int glTex = 0;
-    mcglGenTextures(1, &glTex);
-    if (glTex == 0) return 0;
-    // Set non-mipmap filters so the texture is complete even without mipmap levels.
-    // Default GL min filter is GL_NEAREST_MIPMAP_LINEAR which makes textures without
-    // mipmaps sample as white (incomplete texture).
-    int id = g_nextTextureId++;
-    g_textures[id].glId = glTex;
-    // Bind through our own API so g_currentTexture is set — TextureData
-    // checks g_currentTexture and silently skips upload if it's <= 0.
+    int id = vkt_create();
     TextureBind(id);
-    mcglTexParameteri(0x0DE1, 0x2801, 0x2600); // GL_TEXTURE_MIN_FILTER = GL_NEAREST
-    mcglTexParameteri(0x0DE1, 0x2800, 0x2600); // GL_TEXTURE_MAG_FILTER = GL_NEAREST
     return id;
 }
 
 void C4JRender::TextureFree(int idx)
 {
     if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    auto it = g_textures.find(idx);
-    if (it == g_textures.end()) return;
-    unsigned int glTex = it->second.glId;
-    mcglDeleteTextures(1, &glTex);
-    g_textures.erase(it);
+    vkt_free(idx);
 }
 void C4JRender::TextureBind(int idx)
 {
-    // Track logical bind state even off render thread (CBuff recording happens there).
     tl_currentTexture = (idx > 0) ? idx : -1;
     g_sharedTextureId.store(tl_currentTexture, std::memory_order_relaxed);
     if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    if (idx <= 0)
-    {
-        g_currentTexture = -1;
-        mcglBindTexture(0x0DE1, 0);
-        return;
-    }
-    auto it = g_textures.find(idx);
-    if (it == g_textures.end()) return;
+    if (idx <= 0) { g_currentTexture = -1; return; }
     g_currentTexture = idx;
     g_textureEnabled = true;
-    mcglEnable(0x0DE1); // GL_TEXTURE_2D
-    mcglBindTexture(0x0DE1, it->second.glId);
 }
 void C4JRender::TextureBindVertex(int idx) { TextureBind(idx); }
 void C4JRender::TextureSetTextureLevels(int levels) { g_textureLevels = (levels > 0) ? levels : 1; }
@@ -896,47 +883,22 @@ void C4JRender::TextureData(int width, int height, void *data, int level, eTextu
 {
     if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
     if (g_currentTexture <= 0 || !data || width <= 0 || height <= 0) return;
-    // Pixels are 32-bit ARGB ints (0xAARRGGBB). On little-endian, memory order is BB GG RR AA.
-    // GL_BGRA + GL_UNSIGNED_BYTE reads bytes as B G R A which maps correctly.
-    mcglTexImage2D(0x0DE1, level, 0x1908, width, height, 0, 0x80E1, 0x1401, data); // GL_BGRA
+    vkt_upload(g_currentTexture, width, height, data, level);
 }
 void C4JRender::TextureDataUpdate(int xoffset, int yoffset, int width, int height, void *data, int level)
 {
     if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
     if (g_currentTexture <= 0 || !data || width <= 0 || height <= 0) return;
-    mcglTexSubImage2D(0x0DE1, level, xoffset, yoffset, width, height, 0x80E1, 0x1401, data);
+    vkt_sub_upload(g_currentTexture, xoffset, yoffset, width, height, data, level);
 }
 void C4JRender::TextureSetParam(int param, int value)
 {
     if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    int pname = 0x2801; // GL_TEXTURE_MIN_FILTER
-    int mapped = 0x2600; // GL_NEAREST
-    if (param == GL_TEXTURE_MIN_FILTER)
+    if (g_currentTexture <= 0) return;
+    if (param == GL_TEXTURE_MIN_FILTER || param == GL_TEXTURE_MAG_FILTER)
     {
-        pname = 0x2801;
-        // Keep minification non-mipmapped unless we have complete mip chains for all textures.
-        mapped = (value == GL_LINEAR) ? 0x2601 : 0x2600;
+        vkt_set_filter(g_currentTexture, value == GL_LINEAR);
     }
-    else if (param == GL_TEXTURE_MAG_FILTER)
-    {
-        pname = 0x2800;
-        mapped = (value == GL_LINEAR) ? 0x2601 : 0x2600;
-    }
-    else if (param == GL_TEXTURE_WRAP_S)
-    {
-        pname = 0x2802;
-        mapped = (value == GL_REPEAT) ? 0x2901 : 0x812F;
-    }
-    else if (param == GL_TEXTURE_WRAP_T)
-    {
-        pname = 0x2803;
-        mapped = (value == GL_REPEAT) ? 0x2901 : 0x812F;
-    }
-    else
-    {
-        return;
-    }
-    mcglTexParameteri(0x0DE1, pname, mapped);
 }
 void C4JRender::TextureDynamicUpdateStart() {}
 void C4JRender::TextureDynamicUpdateEnd() {}
