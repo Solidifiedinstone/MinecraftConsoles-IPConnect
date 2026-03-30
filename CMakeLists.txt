@@ -255,6 +255,11 @@ elseif(CMAKE_HOST_UNIX)
   )
 endif()
 
+# Copy server.txt (lives at repo root, not inside Minecraft.Client/)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/server.txt")
+  file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/server.txt" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/")
+endif()
+
 if(WIN32)
   set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT MinecraftClient)
 endif()
