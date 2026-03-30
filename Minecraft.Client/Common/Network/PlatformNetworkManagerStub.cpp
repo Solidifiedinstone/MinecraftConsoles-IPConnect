@@ -11,6 +11,13 @@
 #include "../../MinecraftServer.h"
 #include "../../PlayerList.h"
 #include <iostream>
+#elif defined(_LINUX64)
+#include "../../Linux64/Network/PosixNetLayer.h"
+#include "../../Windows64/Windows64_Xuid.h"
+#include "../../Minecraft.h"
+#include "../../User.h"
+#include "../../MinecraftServer.h"
+#include "../../PlayerList.h"
 #endif
 
 CPlatformNetworkManagerStub *g_pPlatformNetworkManager;
@@ -418,7 +425,7 @@ bool CPlatformNetworkManagerStub::_StartGame()
 
 int CPlatformNetworkManagerStub::JoinGame(FriendSessionInfo* searchResult, int localUsersMask, int primaryUserIndex)
 {
-#ifdef _WINDOWS64
+#if defined(_WINDOWS64) || defined(_LINUX64)
 	if (searchResult == NULL)
 		return CGameNetworkManager::JOINGAME_FAIL_GENERAL;
 
