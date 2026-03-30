@@ -1,51 +1,54 @@
-#include <GL/gl.h>
+/*
+ * gl_api.cpp — Stubbed out. All rendering now goes through Vulkan backend.
+ * These functions are kept as no-ops so existing mcgl* call sites compile.
+ */
 #include "gl_api.h"
 
-void mcglViewport(int x, int y, int w, int h) { glViewport(x, y, w, h); }
-void mcglEnable(unsigned int cap) { glEnable(cap); }
-void mcglDisable(unsigned int cap) { glDisable(cap); }
-void mcglDepthFunc(unsigned int func) { glDepthFunc(func); }
-void mcglClearColor(float r, float g, float b, float a) { glClearColor(r, g, b, a); }
-void mcglMatrixMode(unsigned int mode) { glMatrixMode(mode); }
-void mcglLoadIdentity() { glLoadIdentity(); }
-void mcglLoadMatrixf(const float *m) { glLoadMatrixf(m); }
-void mcglBegin(unsigned int mode) { glBegin(mode); }
-void mcglEnd() { glEnd(); }
-void mcglColor4ub(unsigned char r, unsigned char g, unsigned char b, unsigned char a) { glColor4ub(r, g, b, a); }
-void mcglColor4f(float r, float g, float b, float a) { glColor4f(r, g, b, a); }
-void mcglTexCoord2f(float u, float v) { glTexCoord2f(u, v); }
-void mcglVertex3f(float x, float y, float z) { glVertex3f(x, y, z); }
-void mcglTranslatef(float x, float y, float z) { glTranslatef(x, y, z); }
-void mcglRotatef(float angle, float x, float y, float z) { glRotatef(angle, x, y, z); }
-void mcglScalef(float x, float y, float z) { glScalef(x, y, z); }
-void mcglMultMatrixf(const float *m) { glMultMatrixf(m); }
-void mcglOrtho(double left, double right, double bottom, double top, double zNear, double zFar) { glOrtho(left, right, bottom, top, zNear, zFar); }
-void mcglFrustum(double left, double right, double bottom, double top, double zNear, double zFar) { glFrustum(left, right, bottom, top, zNear, zFar); }
-void mcglPushMatrix() { glPushMatrix(); }
-void mcglPopMatrix() { glPopMatrix(); }
-void mcglGetFloatv(unsigned int pname, float *params) { glGetFloatv(pname, params); }
-void mcglGenTextures(int n, unsigned int *textures) { glGenTextures(n, textures); }
-void mcglDeleteTextures(int n, const unsigned int *textures) { glDeleteTextures(n, textures); }
-void mcglBindTexture(unsigned int target, unsigned int texture) { glBindTexture(target, texture); }
-void mcglTexImage2D(unsigned int target, int level, int internalformat, int width, int height, int border, unsigned int format, unsigned int type, const void *data) { glTexImage2D(target, level, internalformat, width, height, border, format, type, data); }
-void mcglTexSubImage2D(unsigned int target, int level, int xoffset, int yoffset, int width, int height, unsigned int format, unsigned int type, const void *data) { glTexSubImage2D(target, level, xoffset, yoffset, width, height, format, type, data); }
-void mcglTexParameteri(unsigned int target, unsigned int pname, int value) { glTexParameteri(target, pname, value); }
-void mcglClear(unsigned int mask) { glClear(mask); }
-void mcglScissor(int x, int y, int w, int h) { glScissor(x, y, w, h); }
-void mcglDepthMask(unsigned char flag) { glDepthMask(flag); }
-void mcglBlendFunc(unsigned int src, unsigned int dst) { glBlendFunc(src, dst); }
-void mcglBlendColor(float r, float g, float b, float a) { glBlendColor(r, g, b, a); }
-void mcglAlphaFunc(unsigned int func, float ref) { glAlphaFunc(func, ref); }
-void mcglFrontFace(unsigned int mode) { glFrontFace(mode); }
-void mcglLineWidth(float width) { glLineWidth(width); }
-void mcglColorMask(unsigned char r, unsigned char g, unsigned char b, unsigned char a) { glColorMask(r, g, b, a); }
-void mcglPolygonOffset(float factor, float units) { glPolygonOffset(factor, units); }
-void mcglFogi(unsigned int pname, int value) { glFogi(pname, value); }
-void mcglFogf(unsigned int pname, float value) { glFogf(pname, value); }
-void mcglFogfv(unsigned int pname, const float *params) { glFogfv(pname, params); }
-void mcglLightfv(unsigned int light, unsigned int pname, const float *params) { glLightfv(light, pname, params); }
-void mcglLightModelfv(unsigned int pname, const float *params) { glLightModelfv(pname, params); }
-void mcglShadeModel(unsigned int mode) { glShadeModel(mode); }
-unsigned int mcglGetError() { return glGetError(); }
-void mcglTexEnvi(unsigned int target, unsigned int pname, int param) { glTexEnvi(target, pname, param); }
-void mcglGetIntegerv(unsigned int pname, int *params) { glGetIntegerv(pname, params); }
+void mcglViewport(int, int, int, int) {}
+void mcglEnable(unsigned int) {}
+void mcglDisable(unsigned int) {}
+void mcglDepthFunc(unsigned int) {}
+void mcglClearColor(float, float, float, float) {}
+void mcglMatrixMode(unsigned int) {}
+void mcglLoadIdentity() {}
+void mcglLoadMatrixf(const float*) {}
+void mcglBegin(unsigned int) {}
+void mcglEnd() {}
+void mcglColor4ub(unsigned char, unsigned char, unsigned char, unsigned char) {}
+void mcglColor4f(float, float, float, float) {}
+void mcglTexCoord2f(float, float) {}
+void mcglVertex3f(float, float, float) {}
+void mcglTranslatef(float, float, float) {}
+void mcglRotatef(float, float, float, float) {}
+void mcglScalef(float, float, float) {}
+void mcglMultMatrixf(const float*) {}
+void mcglOrtho(double, double, double, double, double, double) {}
+void mcglFrustum(double, double, double, double, double, double) {}
+void mcglPushMatrix() {}
+void mcglPopMatrix() {}
+void mcglGetFloatv(unsigned int, float*) {}
+void mcglGenTextures(int, unsigned int*) {}
+void mcglDeleteTextures(int, const unsigned int*) {}
+void mcglBindTexture(unsigned int, unsigned int) {}
+void mcglTexImage2D(unsigned int, int, int, int, int, int, unsigned int, unsigned int, const void*) {}
+void mcglTexSubImage2D(unsigned int, int, int, int, int, int, unsigned int, unsigned int, const void*) {}
+void mcglTexParameteri(unsigned int, unsigned int, int) {}
+void mcglClear(unsigned int) {}
+void mcglScissor(int, int, int, int) {}
+void mcglDepthMask(unsigned char) {}
+void mcglBlendFunc(unsigned int, unsigned int) {}
+void mcglBlendColor(float, float, float, float) {}
+void mcglAlphaFunc(unsigned int, float) {}
+void mcglFrontFace(unsigned int) {}
+void mcglLineWidth(float) {}
+void mcglColorMask(unsigned char, unsigned char, unsigned char, unsigned char) {}
+void mcglPolygonOffset(float, float) {}
+void mcglFogi(unsigned int, int) {}
+void mcglFogf(unsigned int, float) {}
+void mcglFogfv(unsigned int, const float*) {}
+void mcglLightfv(unsigned int, unsigned int, const float*) {}
+void mcglLightModelfv(unsigned int, const float*) {}
+void mcglShadeModel(unsigned int) {}
+unsigned int mcglGetError() { return 0; }
+void mcglTexEnvi(unsigned int, unsigned int, int) {}
+void mcglGetIntegerv(unsigned int, int*) {}

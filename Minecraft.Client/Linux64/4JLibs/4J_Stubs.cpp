@@ -29,6 +29,7 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 #include "gl_api.h"
+#include "vk_backend.h"
 #include "../SessionLog.h"
 
 /* ====================================================================
@@ -310,19 +311,17 @@ static bool ensureGLReady()
         glfwSetErrorCallback(onGlfwError);
         if (!glfwInit())
         {
-            SessionLog_Printf("[linuxgl] glfwInit failed\n");
+            SessionLog_Printf("[vk] glfwInit failed\n");
             return false;
         }
         glfwInitDone = true;
     }
 
+    // Create window with NO API — Vulkan provides rendering.
     glfwDefaultWindowHints();
     glfwWindowHint(GLFW_VISIBLE, GLFW_TRUE);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
-    // Request compat profile for fixed-function GL (glBegin/End, matrix stack, lighting, fog).
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_ANY_PROFILE);
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     int w = (g_iScreenWidth > 0) ? g_iScreenWidth : 1280;
     int h = (g_iScreenHeight > 0) ? g_iScreenHeight : 720;
     if (w < 640) w = 640;
@@ -335,22 +334,22 @@ static bool ensureGLReady()
         g_window = glfwCreateWindow(800, 600, "Minecraft Console Edition", nullptr, nullptr);
     if (!g_window)
     {
-        SessionLog_Printf("[linuxgl] failed to create GLFW window\n");
+        SessionLog_Printf("[vk] failed to create GLFW window\n");
         return false;
     }
 
-    glfwMakeContextCurrent(g_window);
     glfwShowWindow(g_window);
-    glfwSwapInterval(1);
     glfwGetFramebufferSize(g_window, &g_iScreenWidth, &g_iScreenHeight);
     if (g_iScreenWidth < 1) g_iScreenWidth = 1;
     if (g_iScreenHeight < 1) g_iScreenHeight = 1;
     g_iAspectRatio = (float)g_iScreenWidth / (float)g_iScreenHeight;
-    mcglViewport(0, 0, g_iScreenWidth, g_iScreenHeight);
-    mcglEnable(0x0DE1); // GL_TEXTURE_2D
-    mcglEnable(0x0B71); // GL_DEPTH_TEST
-    mcglDepthFunc(0x0203); // GL_LEQUAL
-    mcglClearColor(g_clearRGBA[0], g_clearRGBA[1], g_clearRGBA[2], g_clearRGBA[3]);
+
+    // Initialize Vulkan backend
+    if (!vkb_init(g_window))
+    {
+        SessionLog_Printf("[vk] Vulkan init failed\n");
+        return false;
+    }
 
     g_renderThread = std::this_thread::get_id();
     g_glReady.store(true, std::memory_order_release);
@@ -557,21 +556,13 @@ void C4JRender::UpdateGamma(unsigned short /*usGamma*/) {}
 void C4JRender::StartFrame()
 {
     if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    // Force sane baseline state each frame to prevent inter-frame state leaks.
-    mcglColorMask(1, 1, 1, 1);
-    mcglDepthMask(1);
-    mcglDisable(0x0C11); // GL_SCISSOR_TEST
-    mcglDisable(0x0BE2); // GL_BLEND
-    mcglEnable(0x0B71);  // GL_DEPTH_TEST
-    mcglDepthFunc(0x0203); // GL_LEQUAL
-    mcglAlphaFunc(0x0204, 0.1f); // GL_GREATER, 0.1f
-    mcglBlendFunc(0x0302, 0x0303); // GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA
+    vkb_begin_frame();
 }
 void C4JRender::Present()
 {
     if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread)
         return;
-    glfwSwapBuffers(g_window);
+    vkb_end_frame();
 }
 void C4JRender::Clear(int flags, D3D11_RECT *pRect)
 {
@@ -601,8 +592,11 @@ void C4JRender::SetClearColour(const float colourRGBA[4])
     g_clearRGBA[1] = colourRGBA[1];
     g_clearRGBA[2] = colourRGBA[2];
     g_clearRGBA[3] = colourRGBA[3];
-    if (ensureGLReady() && std::this_thread::get_id() == g_renderThread)
-        mcglClearColor(g_clearRGBA[0], g_clearRGBA[1], g_clearRGBA[2], g_clearRGBA[3]);
+    // Vulkan clear color is applied at render pass begin in vkb_begin_frame()
+    g_vk.clearColor[0] = colourRGBA[0];
+    g_vk.clearColor[1] = colourRGBA[1];
+    g_vk.clearColor[2] = colourRGBA[2];
+    g_vk.clearColor[3] = colourRGBA[3];
 }
 void C4JRender::DoScreenGrabOnNextPresent() {}
 bool C4JRender::IsWidescreen() { return g_iAspectRatio >= 1.5f; }

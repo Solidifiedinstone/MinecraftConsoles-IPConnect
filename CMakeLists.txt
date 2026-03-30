@@ -58,6 +58,7 @@ if(UNIX AND NOT APPLE)
     "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Linux64/Network/PosixNetLayer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Linux64/4JLibs/4J_Stubs.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Linux64/4JLibs/gl_api.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Linux64/4JLibs/vk_backend.cpp"
     # SentientManager stubs already in Extrax64Stubs.cpp
     # DynamicConfigurations stubs already in Extrax64Stubs.cpp
     # SocialManager stubs already in Extrax64Stubs.cpp
@@ -164,13 +165,16 @@ if(UNIX AND NOT APPLE)
   endif()
   find_package(Threads REQUIRED)
   find_package(PNG REQUIRED)
-  find_package(OpenGL REQUIRED)
+  find_package(Vulkan REQUIRED)
+  target_include_directories(MinecraftClient PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Linux64/4JLibs/vma"
+  )
   target_link_libraries(MinecraftClient PRIVATE
     MinecraftWorld
     Threads::Threads
     ${CMAKE_DL_LIBS}
     PNG::PNG
-    OpenGL::GL
+    Vulkan::Vulkan
     glfw
   )
 else()
