@@ -285,12 +285,12 @@ int64_t ConsoleSchematicFile::applyBlocksAndData(LevelChunk *chunk, AABB *chunkB
 	PIXBeginNamedEvent(0,"Setting Block data");
 	chunk->setBlockData(blockData);
 	PIXEndNamedEvent();
-	delete blockData.data;
+	delete[] blockData.data;
 	chunk->recalcHeightmapOnly();
 	PIXBeginNamedEvent(0,"Setting Data data");
 	chunk->setDataData(dataData);
 	PIXEndNamedEvent();
-	delete dataData.data;
+	delete[] dataData.data;
 
 	// A basic pass through to roughly do the lighting. At this point of post-processing, we don't have all the neighbouring chunks loaded in,
 	// so any lighting here should be things that won't propagate out of this chunk.
@@ -807,7 +807,7 @@ void ConsoleSchematicFile::getBlocksAndData(LevelChunk *chunk, byteArray *data, 
 				blocksP += len;
 			}
 		}
-	delete blockData.data;
+	delete[] blockData.data;
 
 	byteArray dataData = byteArray(Level::CHUNK_TILE_COUNT);
 	chunk->getDataData(dataData);
@@ -829,7 +829,7 @@ void ConsoleSchematicFile::getBlocksAndData(LevelChunk *chunk, byteArray *data, 
 				dataP += len;
 			}
 		}
-	delete dataData.data;
+	delete[] dataData.data;
 
 	// 4J Stu - Allow ignoring light data
 	if(blockLightP > -1)
@@ -854,7 +854,7 @@ void ConsoleSchematicFile::getBlocksAndData(LevelChunk *chunk, byteArray *data, 
 					blockLightP += len;
 				}
 			}
-			delete blockLightData.data;
+			delete[] blockLightData.data;
 	}
 
 
@@ -881,7 +881,7 @@ void ConsoleSchematicFile::getBlocksAndData(LevelChunk *chunk, byteArray *data, 
 					skyLightP += len;
 				}
 			}
-			delete skyLightData.data;
+			delete[] skyLightData.data;
 	}
 
 	return;
@@ -973,7 +973,7 @@ void ConsoleSchematicFile::setBlocksAndData(LevelChunk *chunk, byteArray blockDa
 				}
 			}
 		chunk->setBlockLightData(blockLightData);
-		delete blockLightData.data;
+		delete[] blockLightData.data;
 	}
 
 	// 4J Stu - Allow ignoring light data
@@ -1000,7 +1000,7 @@ void ConsoleSchematicFile::setBlocksAndData(LevelChunk *chunk, byteArray blockDa
 				}
 			}
 			chunk->setSkyLightData(skyLightData);
-			delete skyLightData.data;
+			delete[] skyLightData.data;
 	}
 }
 

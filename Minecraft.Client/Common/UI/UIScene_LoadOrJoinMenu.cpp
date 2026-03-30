@@ -3185,7 +3185,7 @@ int UIScene_LoadOrJoinMenu::DownloadSonyCrossSaveThreadProc( LPVOID lpParameter 
                 pClass->m_eSaveTransferState = eSaveTransfer_Converting;
 				pMinecraft->progressRenderer->progressStage(IDS_SAVETRANSFER_STAGE_CONVERTING);
 #endif
-                delete ba.data;
+                delete[] ba.data;
             }
 			break;
         case eSaveTransfer_Converting:
@@ -3691,7 +3691,7 @@ int UIScene_LoadOrJoinMenu::DownloadXbox360SaveThreadProc( LPVOID lpParameter )
 						// set the icon and save image
 						StorageManager.SetSaveImages(ba.data, ba.length, NULL, 0, bTextMetadata, iTextMetadataBytes);
 
-                        delete ba.data;
+                        delete[] ba.data;
                     }
 
                     UIScene_LoadOrJoinMenu::s_transferData = byteArray();

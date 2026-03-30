@@ -180,7 +180,7 @@ DirectoryLevelStorage::~DirectoryLevelStorage()
 	}
 
 #ifdef _LARGE_WORLDS
-	delete m_usedMappings.data;
+	delete[] m_usedMappings.data;
 #endif
 }
 

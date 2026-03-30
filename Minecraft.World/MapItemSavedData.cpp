@@ -45,9 +45,9 @@ MapItemSavedData::HoldingPlayer::HoldingPlayer(shared_ptr<Player> player, const 
 
 MapItemSavedData::HoldingPlayer::~HoldingPlayer()
 {
-	delete rowsDirtyMin.data;
-	delete rowsDirtyMax.data;
-	delete lastSentDecorations.data;
+	delete[] rowsDirtyMin.data;
+	delete[] rowsDirtyMax.data;
+	delete[] lastSentDecorations.data;
 }
 
 charArray MapItemSavedData::HoldingPlayer::nextUpdatePacket(shared_ptr<ItemInstance> itemInstance)
@@ -134,7 +134,7 @@ charArray MapItemSavedData::HoldingPlayer::nextUpdatePacket(shared_ptr<ItemInsta
 			memcpy(lastSentDecorations.data, data.data, data.length);
 			return data;
 		}
-		delete data.data;
+		delete[] data.data;
 	}
 	shared_ptr<ServerPlayer> servPlayer = dynamic_pointer_cast<ServerPlayer>(player);
 	for (int d = 0; d < 10; d++)
@@ -173,7 +173,7 @@ MapItemSavedData::MapItemSavedData(const wstring& id) : SavedData( id )
 
 MapItemSavedData::~MapItemSavedData()
 {
-	delete colors.data;
+	delete[] colors.data;
 	for( unsigned int i = 0; i < decorations.size(); i++ )
 	{
 		delete decorations[i];

@@ -16,7 +16,7 @@ RemoveEntitiesPacket::RemoveEntitiesPacket(intArray ids)
 
 RemoveEntitiesPacket::~RemoveEntitiesPacket()
 {
-	delete ids.data;
+	delete[] ids.data;
 }
 
 void RemoveEntitiesPacket::read(DataInputStream *dis) //throws IOException 

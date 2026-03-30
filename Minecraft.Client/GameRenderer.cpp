@@ -342,7 +342,7 @@ void GameRenderer::pick(float a)
 		}
 		delete p;
 	}
-	delete objects;
+	// Note: objects is a pointer to Level::es (member variable), not heap-allocated.
 
 	if (hovered != NULL)
 	{

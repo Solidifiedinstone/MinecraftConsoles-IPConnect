@@ -101,7 +101,11 @@ if(UNIX AND NOT APPLE)
     -fpermissive
     -Wno-invalid-offsetof
     -fstack-protector-strong
+    $<$<BOOL:${ENABLE_ASAN}>:-fsanitize=address -fno-omit-frame-pointer>
   )
+  if(ENABLE_ASAN)
+    target_link_options(MinecraftWorld PRIVATE -fsanitize=address)
+  endif()
 else()
   target_compile_definitions(MinecraftWorld PRIVATE
     $<$<CONFIG:Debug>:_LARGE_WORLDS;_DEBUG_MENUS_ENABLED;_DEBUG;_LIB;_CRT_NON_CONFORMING_SWPRINTFS;_CRT_SECURE_NO_WARNINGS;_WINDOWS64>
@@ -153,7 +157,11 @@ if(UNIX AND NOT APPLE)
     -fpermissive
     -Wno-invalid-offsetof
     -fstack-protector-strong
+    $<$<BOOL:${ENABLE_ASAN}>:-fsanitize=address -fno-omit-frame-pointer>
   )
+  if(ENABLE_ASAN)
+    target_link_options(MinecraftClient PRIVATE -fsanitize=address)
+  endif()
   find_package(Threads REQUIRED)
   find_package(PNG REQUIRED)
   find_package(OpenGL REQUIRED)

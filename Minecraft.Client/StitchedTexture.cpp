@@ -64,12 +64,15 @@ void StitchedTexture::freeFrameTextures()
 
 StitchedTexture::~StitchedTexture()
 {
-	for(auto& frame : *frames)
+	if (frames)
 	{
-		if ( frame )
-			delete frame;
+		for(auto& frame : *frames)
+		{
+			if ( frame )
+				delete frame;
+		}
+		delete frames;
 	}
-	delete frames;
 }
 
 void StitchedTexture::initUVs(float U0, float V0, float U1, float V1)
