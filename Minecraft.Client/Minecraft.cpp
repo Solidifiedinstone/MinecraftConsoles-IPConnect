@@ -722,7 +722,7 @@ void Minecraft::run()
 		//                stop();
 		//            }
 
-		if (pause && level != NULL)
+		if (paused && level != NULL)
 		{
 			float lastA = timer->a;
 			timer->advanceTime();
@@ -750,7 +750,7 @@ void Minecraft::run()
 
 		TileRenderer::fancy = options->fancyGraphics;
 
-		// if (pause) timer.a = 1;
+		// if (paused) timer.a = 1;
 
 		soundEngine->update(player, timer->a);
 
@@ -1685,9 +1685,9 @@ void Minecraft::run_middle()
 						s_prevXButtons[i] = xCurButtons;
 					}
 					bool startJustPressed = s_startPressLatch[i] > 0;
-					bool tryJoin = !pause && !ui.IsIgnorePlayerJoinMenuDisplayed(ProfileManager.GetPrimaryPad()) && g_NetworkManager.SessionHasSpace() && xCurButtons != 0;
+					bool tryJoin = !paused && !ui.IsIgnorePlayerJoinMenuDisplayed(ProfileManager.GetPrimaryPad()) && g_NetworkManager.SessionHasSpace() && xCurButtons != 0;
 #else
-					bool tryJoin = !pause && !ui.IsIgnorePlayerJoinMenuDisplayed(ProfileManager.GetPrimaryPad()) && g_NetworkManager.SessionHasSpace() && RenderManager.IsHiDef() && InputManager.ButtonPressed(i);
+					bool tryJoin = !paused && !ui.IsIgnorePlayerJoinMenuDisplayed(ProfileManager.GetPrimaryPad()) && g_NetworkManager.SessionHasSpace() && RenderManager.IsHiDef() && InputManager.ButtonPressed(i);
 #endif
 #ifdef __ORBIS__
 					// Check for remote play
@@ -1846,7 +1846,7 @@ void Minecraft::run_middle()
 
 #ifdef _DURANGO
 			// did we just get input from a player who doesn't exist? They'll be wanting to join the game then
-			if(!pause && !ui.IsIgnorePlayerJoinMenuDisplayed(ProfileManager.GetPrimaryPad()) && g_NetworkManager.SessionHasSpace() && RenderManager.IsHiDef() )
+			if(!paused && !ui.IsIgnorePlayerJoinMenuDisplayed(ProfileManager.GetPrimaryPad()) && g_NetworkManager.SessionHasSpace() && RenderManager.IsHiDef() )
 			{
 				int firstEmptyUser = 0;
 				for( int i = 0; i < XUSER_MAX_COUNT; i++ )
@@ -1885,7 +1885,7 @@ void Minecraft::run_middle()
 			}
 #endif
 
-			if (pause && level != NULL)
+			if (paused && level != NULL)
 			{
 				float lastA = timer->a;
 				timer->advanceTime();
@@ -1989,7 +1989,7 @@ void Minecraft::run_middle()
 
 			TileRenderer::fancy = options->fancyGraphics;
 
-			// if (pause) timer.a = 1;
+			// if (paused) timer.a = 1;
 
 			PIXBeginNamedEvent(0,"Sound engine update");
 			soundEngine->tick((shared_ptr<Mob> *)localplayers, timer->a);
@@ -2379,14 +2379,14 @@ void Minecraft::tick(bool bFirst, bool bUpdateTextures)
 
 	// soundEngine.playMusicTick();
 
-	if (!pause && level != NULL) gameMode->tick();
+	if (!paused && level != NULL) gameMode->tick();
 	MemSect(31);
 	glBindTexture(GL_TEXTURE_2D, textures->loadTexture(TN_TERRAIN)); //L"/terrain.png"));
 	MemSect(0);
 	if( bFirst )
 	{
 		PIXBeginNamedEvent(0,"Texture tick");
-		if (!pause) textures->tick(bUpdateTextures);
+		if (!paused) textures->tick(bUpdateTextures);
 		PIXEndNamedEvent();
 	}
 
@@ -4079,7 +4079,7 @@ void Minecraft::tick(bool bFirst, bool bUpdateTextures)
 		}
 
 		PIXBeginNamedEvent(0,"Game renderer tick");
-		if (!pause) gameRenderer->tick( bFirst);
+		if (!paused) gameRenderer->tick( bFirst);
 		PIXEndNamedEvent();
 
 		// 4J - we want to tick each level once only per frame, and do it when a player that is actually in that level happens to be active.
@@ -4106,22 +4106,22 @@ void Minecraft::tick(bool bFirst, bool bUpdateTextures)
 
 			// 4J - this doesn't fully tick the animateTick here, but does register this player's position. The actual
 			// work is now done in Level::animateTickDoWork() so we can take into account multiple players in the one level.
-			if (!pause && levels[i] != NULL) levels[i]->animateTick(Mth::floor(player->x), Mth::floor(player->y), Mth::floor(player->z));
+			if (!paused && levels[i] != NULL) levels[i]->animateTick(Mth::floor(player->x), Mth::floor(player->y), Mth::floor(player->z));
 
 			if( levelsTickedFlags & ( 1 << i ) ) continue; // Don't tick further if we've already ticked this level this frame
 			levelsTickedFlags |= (1 << i);
 
 			PIXBeginNamedEvent(0,"Level renderer tick");
-			if (!pause) levelRenderer->tick();
+			if (!paused) levelRenderer->tick();
 			PIXEndNamedEvent();
-			// if (!pause && player!=null) {
+			// if (!paused && player!=null) {
 			// if (player != null && !level.entities.contains(player)) {
 			// level.addEntity(player);
 			// }
 			// }
 			if( levels[i] != NULL )
 			{
-				if (!pause)
+				if (!paused)
 				{
 					if (levels[i]->skyFlashTime > 0) levels[i]->skyFlashTime--;
 					PIXBeginNamedEvent(0,"Level entity tick");
@@ -4158,7 +4158,7 @@ void Minecraft::tick(bool bFirst, bool bUpdateTextures)
 #endif // __PS3__
 
 				// 4J Stu - We are always online, but still could be paused
-				if (!pause) // || isClientSide())
+				if (!paused) // || isClientSide())
 				{
 					//app.DebugPrintf("Minecraft::tick spawn settings - Difficulty = %d",options->difficulty);
 					levels[i]->setSpawnSettings(level->difficulty > 0, true);
@@ -4176,12 +4176,12 @@ void Minecraft::tick(bool bFirst, bool bUpdateTextures)
 		if( bFirst )
 		{
 			PIXBeginNamedEvent(0,"Particle tick");
-			if (!pause) particleEngine->tick();
+			if (!paused) particleEngine->tick();
 			PIXEndNamedEvent();
 		}
 
 		// 4J Stu - Keep ticking the connections if paused so that they don't time out
-		if( pause ) tickAllConnections();
+		if( paused ) tickAllConnections();
 		// player->tick();
 	}
 #ifdef __PS3__

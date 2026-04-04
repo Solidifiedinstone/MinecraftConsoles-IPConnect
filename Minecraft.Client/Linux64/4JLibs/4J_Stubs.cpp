@@ -471,18 +471,9 @@ static void executeDraw(const DrawCall &call)
     // is unreliable across display list replay boundaries.
     pc.textureEnable   = (effectiveTextureId > 0) ? 1.0f : 0.0f;
     pc.fogEnable       = g_renderState.fogEnable ? 1.0f : 0.0f;
-    // Use game's fog color, but fall back to sky blue if fog color is black
-    // (colour table or fogBr brightness not yet initialized)
-    if (g_renderState.fogColor[0] > 0.001f || g_renderState.fogColor[1] > 0.001f || g_renderState.fogColor[2] > 0.001f) {
-        pc.fogColor[0] = g_renderState.fogColor[0];
-        pc.fogColor[1] = g_renderState.fogColor[1];
-        pc.fogColor[2] = g_renderState.fogColor[2];
-    } else {
-        // Default Minecraft overworld fog color (0x00C0D8FF from colours.col)
-        pc.fogColor[0] = 0.753f; // 0xC0/255
-        pc.fogColor[1] = 0.847f; // 0xD8/255
-        pc.fogColor[2] = 1.0f;   // 0xFF/255
-    }
+    pc.fogColor[0] = g_renderState.fogColor[0];
+    pc.fogColor[1] = g_renderState.fogColor[1];
+    pc.fogColor[2] = g_renderState.fogColor[2];
     pc.fogColor[3]     = 1.0f;
     pc.fogParams[0]    = g_renderState.fogNear;
     pc.fogParams[1]    = g_renderState.fogFar;
@@ -687,9 +678,12 @@ void C4JRender::Present()
         return;
     g_frameCount++;
     if (g_frameCount % 30 == 1)
-        SessionLog_Printf("[vk-diag] frame %d: %d draws (%d in/%d out frustum) cbuf=%d staging=%llu\n",
+        SessionLog_Printf("[vk-diag] frame %d: %d draws (%d in/%d out frustum) cbuf=%d staging=%llu clear=%.3f,%.3f,%.3f fog=%.3f,%.3f,%.3f fogE=%d\n",
             g_frameCount, g_drawCallCount, g_drawsInFrustum, g_drawsOutFrustum,
-            g_cbuffCallCount, (unsigned long long)g_vk.stagingOffset);
+            g_cbuffCallCount, (unsigned long long)g_vk.stagingOffset,
+            g_vk.clearColor[0], g_vk.clearColor[1], g_vk.clearColor[2],
+            g_renderState.fogColor[0], g_renderState.fogColor[1], g_renderState.fogColor[2],
+            g_renderState.fogEnable ? 1 : 0);
     g_drawsInFrustum = 0;
     g_drawsOutFrustum = 0;
     if (g_vk.inRenderPass)
@@ -723,13 +717,6 @@ void C4JRender::SetClearColour(const float colourRGBA[4])
     g_clearRGBA[1] = colourRGBA[1];
     g_clearRGBA[2] = colourRGBA[2];
     g_clearRGBA[3] = colourRGBA[3];
-    // Guard against fogBr=0 zeroing out clear color during early frames.
-    // After 120 frames (~2 seconds at 60fps), fogBr has converged and the
-    // game's values are authoritative (including dark skies at night).
-    static int s_clearCount = 0;
-    s_clearCount++;
-    if (s_clearCount < 120 && colourRGBA[0] < 0.05f && colourRGBA[1] < 0.05f && colourRGBA[2] < 0.05f)
-        return; // skip near-black updates during brightness ramp-up
     g_vk.clearColor[0] = colourRGBA[0];
     g_vk.clearColor[1] = colourRGBA[1];
     g_vk.clearColor[2] = colourRGBA[2];
@@ -1261,12 +1248,16 @@ void C4JRender::StateSetDepthSlopeAndBias(float slope, float bias)
 }
 void C4JRender::SetNextDrawVertexColor(bool hasColor) { tl_nextDrawHasVertexColor = hasColor; }
 void C4JRender::StateSetTextureEnable(bool enable) { g_textureEnabled = enable; }
-void C4JRender::StateSetFogEnable(bool enable) { g_renderState.fogEnable = enable; }
+void C4JRender::StateSetFogEnable(bool enable) {
+    g_renderState.fogEnable = enable;
+}
 void C4JRender::StateSetFogMode(int mode) { g_renderState.fogMode = (mode == GL_EXP) ? 1 : 0; }
 void C4JRender::StateSetFogNearDistance(float dist) { g_renderState.fogNear = dist; }
 void C4JRender::StateSetFogFarDistance(float dist) { g_renderState.fogFar = dist; }
 void C4JRender::StateSetFogDensity(float density) { g_renderState.fogDensity = density; }
-void C4JRender::StateSetFogColour(float r, float g, float b) { g_renderState.fogColor[0]=r; g_renderState.fogColor[1]=g; g_renderState.fogColor[2]=b; }
+void C4JRender::StateSetFogColour(float r, float g, float b) {
+    g_renderState.fogColor[0]=r; g_renderState.fogColor[1]=g; g_renderState.fogColor[2]=b;
+}
 void C4JRender::StateSetLightingEnable(bool enable) {}
 void C4JRender::StateSetVertexTextureUV(float u, float v)
 {

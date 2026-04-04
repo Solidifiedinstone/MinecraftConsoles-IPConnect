@@ -57,6 +57,7 @@ void ClockTexture::cycleFrames()
 	// 4J Stu - We share data with another texture
 	if(m_dataTexture != NULL)
 	{
+		if (!m_dataTexture->frames || m_dataTexture->frames->empty()) return;
 		int newFrame = (int) ((rot + 1.0) * m_dataTexture->frames->size()) % m_dataTexture->frames->size();
 		while (newFrame < 0)
 		{
@@ -70,6 +71,7 @@ void ClockTexture::cycleFrames()
 	}
 	else
 	{
+		if (!frames || frames->empty()) return;
 		int newFrame = (int) ((rot + 1.0) * frames->size()) % frames->size();
 		while (newFrame < 0)
 		{

@@ -461,8 +461,8 @@ void Texture::blit(int x, int y, Texture *source, bool rotated)
 		}
 #else
 
-		int dstBufSize = ww * hh * 4;
-		int srcBufSize = sww * shh * 4;
+		int dstBufSize = (int)data[level]->limit();
+		int srcBufSize = (int)srcBuffer->limit();
 		for (int srcY = 0; srcY < shh; srcY++)
 		{
 			int dstY = yy + srcY;
@@ -496,7 +496,9 @@ void Texture::blit(int x, int y, Texture *source, bool rotated)
 		// Don't delete this, as it belongs to the source texture
 		//delete srcBuffer;
 #endif
-		data[level]->position(ww * hh * 4);
+		unsigned int endPos = ww * hh * 4;
+		if (endPos > data[level]->limit()) endPos = data[level]->limit();
+		data[level]->position(endPos);
 	}
 
 	if (immediateUpdate)
