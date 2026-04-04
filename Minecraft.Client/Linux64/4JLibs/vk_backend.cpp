@@ -532,9 +532,6 @@ void vkb_end_frame()
     int f = g_vk.currentFrame;
     VkCommandBuffer cmd = g_vk.commandBuffers[f];
 
-    struct timespec t0, t1, t2, t3;
-    clock_gettime(CLOCK_MONOTONIC, &t0);
-
     if (g_vk.inRenderPass)
     {
         vkCmdEndRenderPass(cmd);
@@ -542,8 +539,6 @@ void vkb_end_frame()
     }
 
     vkEndCommandBuffer(cmd);
-
-    clock_gettime(CLOCK_MONOTONIC, &t1);
 
     // Submit
     VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -562,8 +557,6 @@ void vkb_end_frame()
         SessionLog_Printf("[vk] vkQueueSubmit failed: %d\n", (int)submitResult);
     }
 
-    clock_gettime(CLOCK_MONOTONIC, &t2);
-
     // Present
     VkPresentInfoKHR pi = { VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
     pi.waitSemaphoreCount = 1;
@@ -575,18 +568,6 @@ void vkb_end_frame()
     VkResult result = vkQueuePresentKHR(g_vk.graphicsQueue, &pi);
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
         g_vk.swapchainDirty = true;
-
-    clock_gettime(CLOCK_MONOTONIC, &t3);
-
-    static int s_endFrameCount = 0;
-    if (++s_endFrameCount % 30 == 1)
-    {
-        auto ms = [](struct timespec &a, struct timespec &b) -> double {
-            return (b.tv_sec - a.tv_sec) * 1000.0 + (b.tv_nsec - a.tv_nsec) / 1e6;
-        };
-        SessionLog_Printf("[vk-timing] endFrame: cmdEnd=%.1f submit=%.1f present=%.1fms\n",
-            ms(t0, t1), ms(t1, t2), ms(t2, t3));
-    }
 
     g_vk.currentFrame = (f + 1) % VKB_MAX_FRAMES_IN_FLIGHT;
 }
