@@ -502,7 +502,7 @@ bool vkb_begin_frame()
 
     // Begin render pass
     VkClearValue clearValues[2] = {};
-    clearValues[0].color = {{ g_vk.clearColor[0], g_vk.clearColor[1], g_vk.clearColor[2], g_vk.clearColor[3] }};
+    clearValues[0].color = {{g_vk.clearColor[0], g_vk.clearColor[1], g_vk.clearColor[2], g_vk.clearColor[3]}};
     clearValues[1].depthStencil = { 1.0f, 0 };
 
     VkRenderPassBeginInfo rpbi = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };

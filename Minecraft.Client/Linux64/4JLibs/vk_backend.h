@@ -66,7 +66,7 @@ struct VkBackend
     VkDeviceSize             stagingOffset    = 0; // current write offset this frame
 
     // State
-    float                    clearColor[4]    = {0.0f, 0.0f, 0.0f, 1.0f};
+    float                    clearColor[4]    = {0.62f, 0.81f, 1.0f, 1.0f}; // sky blue
     bool                     swapchainDirty   = false;
     bool                     framebufferResized = false;
     bool                     inRenderPass     = false;

@@ -210,13 +210,11 @@ Biome *Biome::setColor(int color)
 
 int Biome::getSkyColor(float temp)
 {
-	//temp /= 3.0f;
-	//if (temp < -1) temp = -1;
-	//if (temp > 1) temp = 1;
-	//return Color::getHSBColor(224 / 360.0f - temp * 0.05f, 0.50f + temp * 0.1f, 1.0f).getRGB();
-
 	// 4J Stu - Load colour from texture pack
-	return Minecraft::GetInstance()->getColourTable()->getColor( m_skyColor );
+	int c = Minecraft::GetInstance()->getColourTable()->getColor( m_skyColor );
+	if (c != 0) return c;
+	// Fallback: original Minecraft sky color calculation (colour table not loaded)
+	return Color::getHSBColor(224 / 360.0f - temp * 0.05f, 0.50f + temp * 0.1f, 1.0f).getRGB();
 }
 
 vector<Biome::MobSpawnerData *> *Biome::getMobs(MobCategory *category)

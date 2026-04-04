@@ -20,16 +20,25 @@ layout(push_constant) uniform PushConstants {
 layout(location = 0) out vec4 fragColor;
 
 void main() {
-    vec4 texColor = (pc.textureEnable > 0.5) ? texture(texSampler, v_uv) : vec4(1.0);
-    vec4 color = texColor * v_color * pc.globalColor;
+    vec4 color;
+    if (pc.textureEnable > 0.5) {
+        color = texture(texSampler, v_uv) * v_color;
+    } else {
+        color = v_color;
+    }
+
+    // Apply global color tint
+    color *= pc.globalColor;
 
     // Alpha test
-    if (pc.alphaTestEnable > 0.5 && color.a <= pc.alphaRef)
+    if (pc.alphaTestEnable > 0.5 && color.a < pc.alphaRef) {
         discard;
+    }
 
     // Fog
-    if (pc.fogEnable > 0.5)
+    if (pc.fogEnable > 0.5) {
         color.rgb = mix(pc.fogColor.rgb, color.rgb, v_fogFactor);
+    }
 
     fragColor = color;
 }

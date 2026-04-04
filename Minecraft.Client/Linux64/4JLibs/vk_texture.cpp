@@ -133,7 +133,7 @@ void vkt_upload(int id, int width, int height, const void* data, int mipLevel)
         {
             VkImageCreateInfo ici = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
             ici.imageType     = VK_IMAGE_TYPE_2D;
-            ici.format        = VK_FORMAT_B8G8R8A8_UNORM; // matches ARGB int byte order on LE
+            ici.format        = VK_FORMAT_R8G8B8A8_UNORM; // game provides RGBA byte order
             ici.extent        = { (uint32_t)width, (uint32_t)height, 1 };
             // Calculate max mip levels from dimensions
             uint32_t maxDim = std::max((uint32_t)width, (uint32_t)height);
@@ -155,7 +155,7 @@ void vkt_upload(int id, int width, int height, const void* data, int mipLevel)
             VkImageViewCreateInfo vci = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
             vci.image    = tex.image;
             vci.viewType = VK_IMAGE_VIEW_TYPE_2D;
-            vci.format   = VK_FORMAT_B8G8R8A8_UNORM;
+            vci.format   = VK_FORMAT_R8G8B8A8_UNORM;
             vci.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, 1 };
             vkCreateImageView(g_vk.device, &vci, nullptr, &tex.view);
 

@@ -9,7 +9,9 @@ void mcglViewport(int, int, int, int) {}
 void mcglEnable(unsigned int) {}
 void mcglDisable(unsigned int) {}
 void mcglDepthFunc(unsigned int) {}
-void mcglClearColor(float, float, float, float) {}
+void mcglClearColor(float r, float g, float b, float a) {
+    g_vk.clearColor[0] = r; g_vk.clearColor[1] = g; g_vk.clearColor[2] = b; g_vk.clearColor[3] = a;
+}
 void mcglMatrixMode(unsigned int) {}
 void mcglLoadIdentity() {}
 void mcglLoadMatrixf(const float*) {}
@@ -46,7 +48,7 @@ void mcglClear(unsigned int mask)
     if (mask & 0x00004000) // GL_COLOR_BUFFER_BIT
     {
         clears[clearCount].aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        clears[clearCount].clearValue.color = {{ g_vk.clearColor[0], g_vk.clearColor[1], g_vk.clearColor[2], g_vk.clearColor[3] }};
+        clears[clearCount].clearValue.color = {{g_vk.clearColor[0], g_vk.clearColor[1], g_vk.clearColor[2], g_vk.clearColor[3]}};
         clearCount++;
     }
     if (mask & 0x00000100) // GL_DEPTH_BUFFER_BIT

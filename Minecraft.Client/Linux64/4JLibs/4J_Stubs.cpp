@@ -90,6 +90,7 @@ thread_local int tl_recordingCbuff = -1;
 thread_local std::vector<DrawCall> tl_recordingCalls;
 thread_local int tl_currentTexture = -1;
 thread_local bool tl_nextDrawHasVertexColor = true; // set by Tesselator before DrawVertices
+thread_local float tl_savedModelForRecording[16]; // saved MV at CBuffStart for restore at CBuffEnd
 
 // ── Render state for Vulkan pipeline selection + push constants ──
 struct RenderState {
@@ -236,6 +237,7 @@ static void softTranslate(float x, float y, float z)
     t[13] = y;
     t[14] = z;
     matPostMul(currentSoftMatrix(), t);
+    // (debug translate logging removed)
 }
 
 static void softScale(float x, float y, float z)
@@ -280,12 +282,12 @@ static void softOrtho(float left, float right, float bottom, float top, float zN
     if (std::fabs(rl) <= 1e-8f || std::fabs(tb) <= 1e-8f || std::fabs(fn) <= 1e-8f)
         return;
 
-    // Left-handed (+Z forward) → Vulkan NDC: depth [0,1], Y-flipped
+    // Right-handed (-Z forward) → Vulkan NDC: depth [0,1], Y-flipped
     float o[16];
     matIdentity(o);
     o[0]  =  2.0f / rl;
     o[5]  = -2.0f / tb;              // Y-flip for Vulkan
-    o[10] =  1.0f / fn;              // LH: +Z forward, depth [0,1]
+    o[10] = -1.0f / fn;              // RH: -Z forward, depth [0,1]
     o[12] = -(right + left) / rl;
     o[13] =  (top + bottom) / tb;    // Y-flip for Vulkan
     o[14] = -zNear / fn;             // depth [0,1]
@@ -300,15 +302,17 @@ static void softFrustum(float left, float right, float bottom, float top, float 
     if (std::fabs(rl) <= 1e-8f || std::fabs(tb) <= 1e-8f || std::fabs(fn) <= 1e-8f || zNear <= 0.0f || zFar <= 0.0f)
         return;
 
-    // Left-handed (+Z forward) → Vulkan NDC: depth [0,1], Y-flipped
+    // Right-handed (-Z forward) → Vulkan NDC: depth [0,1], Y-flipped
+    // The game's modelview produces negative z_view for objects in front
+    // of the camera (standard OpenGL RH convention: glRotatef(yaw+180,...)).
     float f[16];
     memset(f, 0, sizeof(f));
     f[0]  =  (2.0f * zNear) / rl;
     f[5]  = -(2.0f * zNear) / tb;    // Y-flip for Vulkan
     f[8]  =  (right + left) / rl;
     f[9]  = -(top + bottom) / tb;     // Y-flip for Vulkan
-    f[10] =  zFar / fn;               // LH: +Z forward, depth [0,1]
-    f[11] =  1.0f;                     // LH: clip_w = +z_view
+    f[10] = -zFar / fn;               // RH: -Z forward, depth [0,1]
+    f[11] = -1.0f;                     // RH: clip_w = -z_view
     f[14] = -(zFar * zNear) / fn;     // depth [0,1]
     matPostMul(currentSoftMatrix(), f);
 }
@@ -432,17 +436,23 @@ static void executeDraw(const DrawCall &call)
     float mv[16];
     if (call.hasMatrices)
     {
-        // Display list replay: the recorded modelview already includes the
-        // camera view transform that was active at recording time.
-        // Use it directly — do NOT multiply with the current modelview,
-        // which would double-apply the camera.
-        memcpy(mv, call.modelview, sizeof(mv));
+        // CBuffCall replay: vertices are in chunk-local coordinates.
+        // The recorded modelview (call.modelview) contains the chunk-to-world
+        // translation captured during display list compilation (translateToPos).
+        // The current modelview has camera rotation + player translation.
+        // Combined: MV = currentMV * recordedMV  →  transforms local→world→view.
+        float combined[16];
+        matMul(combined, tl_softMatrices.model, call.modelview);
+        memcpy(mv, combined, sizeof(mv));
     }
     else
     {
+        // Immediate draw: current thread's modelview is correct.
         memcpy(mv, tl_softMatrices.model, sizeof(mv));
     }
     mat4Mul(mvp, tl_softMatrices.proj, mv);
+
+    // (per-draw matrix diagnostics removed — frame-level stats in frustum check below)
 
     // ── Push constants ──
     VkPushConstants pc = {};
@@ -461,9 +471,18 @@ static void executeDraw(const DrawCall &call)
     // is unreliable across display list replay boundaries.
     pc.textureEnable   = (effectiveTextureId > 0) ? 1.0f : 0.0f;
     pc.fogEnable       = g_renderState.fogEnable ? 1.0f : 0.0f;
-    pc.fogColor[0]     = g_renderState.fogColor[0];
-    pc.fogColor[1]     = g_renderState.fogColor[1];
-    pc.fogColor[2]     = g_renderState.fogColor[2];
+    // Use game's fog color, but fall back to sky blue if fog color is black
+    // (colour table or fogBr brightness not yet initialized)
+    if (g_renderState.fogColor[0] > 0.001f || g_renderState.fogColor[1] > 0.001f || g_renderState.fogColor[2] > 0.001f) {
+        pc.fogColor[0] = g_renderState.fogColor[0];
+        pc.fogColor[1] = g_renderState.fogColor[1];
+        pc.fogColor[2] = g_renderState.fogColor[2];
+    } else {
+        // Default Minecraft overworld fog color (0x00C0D8FF from colours.col)
+        pc.fogColor[0] = 0.753f; // 0xC0/255
+        pc.fogColor[1] = 0.847f; // 0xD8/255
+        pc.fogColor[2] = 1.0f;   // 0xFF/255
+    }
     pc.fogColor[3]     = 1.0f;
     pc.fogParams[0]    = g_renderState.fogNear;
     pc.fogParams[1]    = g_renderState.fogFar;
@@ -622,15 +641,11 @@ static void executeDraw(const DrawCall &call)
                 g_drawsInFrustum++;
             else
                 g_drawsOutFrustum++;
-            // Log draws 1, 100, 200, 300, 400, 500 every 120 frames
-            if (g_frameCount % 120 == 1 && (g_drawCallCount <= 2 || g_drawCallCount % 100 == 0))
-                SessionLog_Printf("[vk-draw] #%d prim=%d cnt=%d tex=%d hasMat=%d ndc=(%.3f,%.3f,%.3f) w=%.1f\n",
-                    g_drawCallCount, (int)call.primitive, outCount, effectiveTextureId,
-                    (int)call.hasMatrices, nx, ny, nz, tw);
         } else {
             g_drawsOutFrustum++;
         }
     }
+
 }
 
 } // namespace
@@ -708,11 +723,14 @@ void C4JRender::SetClearColour(const float colourRGBA[4])
     g_clearRGBA[1] = colourRGBA[1];
     g_clearRGBA[2] = colourRGBA[2];
     g_clearRGBA[3] = colourRGBA[3];
-    // Vulkan clear color is applied at render pass begin in vkb_begin_frame()
-    g_vk.clearColor[0] = colourRGBA[0];
-    g_vk.clearColor[1] = colourRGBA[1];
-    g_vk.clearColor[2] = colourRGBA[2];
-    g_vk.clearColor[3] = colourRGBA[3];
+    // Only update Vulkan clear color if the game provides a non-black value
+    // (fogBr brightness ramp starts at 0 and zeros the clear color early on)
+    if (colourRGBA[0] > 0.05f || colourRGBA[1] > 0.05f || colourRGBA[2] > 0.05f) {
+        g_vk.clearColor[0] = colourRGBA[0];
+        g_vk.clearColor[1] = colourRGBA[1];
+        g_vk.clearColor[2] = colourRGBA[2];
+        g_vk.clearColor[3] = colourRGBA[3];
+    }
 }
 void C4JRender::DoScreenGrabOnNextPresent() {}
 bool C4JRender::IsWidescreen() { return g_iAspectRatio >= 1.5f; }
@@ -798,20 +816,13 @@ void C4JRender::MatrixMult(float *mat)
 
 const float *C4JRender::MatrixGet(int type)
 {
-    static thread_local float mat[16];
-    if (!ensureGLReady())
-    {
-        memset(mat, 0, sizeof(mat));
-        mat[0] = mat[5] = mat[10] = mat[15] = 1.0f;
-        return mat;
-    }
-    unsigned int pname = 0x0BA6; // GL_MODELVIEW_MATRIX
+    // Return our software matrices directly — mcglGetFloatv is a no-op in Vulkan.
+    ensureSoftMatrices();
     if (type == GL_PROJECTION || type == GL_PROJECTION_MATRIX)
-        pname = 0x0BA7; // GL_PROJECTION_MATRIX
-    else if (type == GL_TEXTURE)
-        pname = 0x0BA8; // GL_TEXTURE_MATRIX
-    mcglGetFloatv(pname, mat);
-    return mat;
+        return tl_softMatrices.proj;
+    if (type == GL_TEXTURE)
+        return tl_softMatrices.tex;
+    return tl_softMatrices.model;
 }
 
 void C4JRender::Set_matrixDirty() {}
@@ -851,10 +862,6 @@ void C4JRender::DrawVertices(ePrimitiveType PrimitiveType, int count, void *data
     // Immediate draw
     call.hasMatrices = false;
 
-    static int imm = 0;
-    imm++;
-    if (imm <= 5) SessionLog_Printf("[vk-diag] immediate draw #%d count=%d inRP=%d\n", imm, count, (int)g_vk.inRenderPass);
-
     if (!ensureGLReady())
         return;
     executeDraw(call);
@@ -887,6 +894,14 @@ void C4JRender::CBuffStart(int index, bool /*full*/)
 {
     tl_recordingCbuff = index;
     tl_recordingCalls.clear();
+    // Save the current modelview and reset to identity.  In real OpenGL,
+    // glNewList(GL_COMPILE) defers operations — they don't touch the current
+    // matrix.  We emulate this by starting recording from identity so that
+    // the captured MV reflects ONLY transforms within the display list
+    // (e.g. chunk-to-world translation), not ambient thread state.
+    ensureSoftMatrices();
+    memcpy(tl_savedModelForRecording, tl_softMatrices.model, sizeof(tl_savedModelForRecording));
+    matIdentity(tl_softMatrices.model);
     if (tl_currentTexture <= 0)
     {
         if (g_currentTexture > 0) tl_currentTexture = g_currentTexture;
@@ -902,6 +917,8 @@ void C4JRender::CBuffEnd()
     g_cbuffs[tl_recordingCbuff] = std::move(tl_recordingCalls);
     tl_recordingCalls.clear();
     tl_recordingCbuff = -1;
+    // Restore modelview saved at CBuffStart (undo the identity reset)
+    memcpy(tl_softMatrices.model, tl_savedModelForRecording, sizeof(tl_softMatrices.model));
 }
 bool C4JRender::CBuffCall(int index, bool /*full*/)
 {
@@ -915,9 +932,6 @@ bool C4JRender::CBuffCall(int index, bool /*full*/)
         local = it->second;
     }
     g_cbuffCallCount++;
-    if (g_frameCount % 120 == 1 && g_cbuffCallCount <= 3)
-        SessionLog_Printf("[vk-cbuf] CBuffCall #%d idx=%d draws=%d inRP=%d\n",
-            g_cbuffCallCount, index, (int)local.size(), (int)g_vk.inRenderPass);
     int replayTextureId = g_currentTexture;
     if (replayTextureId <= 0)
     {

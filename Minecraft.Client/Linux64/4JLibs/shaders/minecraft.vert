@@ -31,9 +31,9 @@ void main() {
         float( inColorPacked         & 0xFFu) / 255.0
     );
 
-    // Fog factor
+    // Fog factor (use eye-space distance: gl_Position.w = -z_eye for RH projection)
     if (pc.fogEnable > 0.5) {
-        float dist = length(gl_Position.xyz);
+        float dist = gl_Position.w;
         if (pc.fogParams.w < 0.5) {
             // Linear fog
             v_fogFactor = clamp((pc.fogParams.y - dist) / (pc.fogParams.y - pc.fogParams.x + 0.001), 0.0, 1.0);
