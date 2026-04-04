@@ -723,14 +723,17 @@ void C4JRender::SetClearColour(const float colourRGBA[4])
     g_clearRGBA[1] = colourRGBA[1];
     g_clearRGBA[2] = colourRGBA[2];
     g_clearRGBA[3] = colourRGBA[3];
-    // Only update Vulkan clear color if the game provides a non-black value
-    // (fogBr brightness ramp starts at 0 and zeros the clear color early on)
-    if (colourRGBA[0] > 0.05f || colourRGBA[1] > 0.05f || colourRGBA[2] > 0.05f) {
-        g_vk.clearColor[0] = colourRGBA[0];
-        g_vk.clearColor[1] = colourRGBA[1];
-        g_vk.clearColor[2] = colourRGBA[2];
-        g_vk.clearColor[3] = colourRGBA[3];
-    }
+    // Guard against fogBr=0 zeroing out clear color during early frames.
+    // After 120 frames (~2 seconds at 60fps), fogBr has converged and the
+    // game's values are authoritative (including dark skies at night).
+    static int s_clearCount = 0;
+    s_clearCount++;
+    if (s_clearCount < 120 && colourRGBA[0] < 0.05f && colourRGBA[1] < 0.05f && colourRGBA[2] < 0.05f)
+        return; // skip near-black updates during brightness ramp-up
+    g_vk.clearColor[0] = colourRGBA[0];
+    g_vk.clearColor[1] = colourRGBA[1];
+    g_vk.clearColor[2] = colourRGBA[2];
+    g_vk.clearColor[3] = colourRGBA[3];
 }
 void C4JRender::DoScreenGrabOnNextPresent() {}
 bool C4JRender::IsWidescreen() { return g_iAspectRatio >= 1.5f; }
