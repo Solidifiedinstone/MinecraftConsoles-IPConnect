@@ -1,8 +1,9 @@
 /*
- * gl_api.cpp — Stubbed out. All rendering now goes through Vulkan backend.
- * These functions are kept as no-ops so existing mcgl* call sites compile.
+ * gl_api.cpp — Minimal GL API stubs. Most rendering goes through Vulkan backend.
+ * mcglClear is implemented to support mid-frame depth/color clears.
  */
 #include "gl_api.h"
+#include "vk_backend.h"
 
 void mcglViewport(int, int, int, int) {}
 void mcglEnable(unsigned int) {}
@@ -33,7 +34,34 @@ void mcglBindTexture(unsigned int, unsigned int) {}
 void mcglTexImage2D(unsigned int, int, int, int, int, int, unsigned int, unsigned int, const void*) {}
 void mcglTexSubImage2D(unsigned int, int, int, int, int, int, unsigned int, unsigned int, const void*) {}
 void mcglTexParameteri(unsigned int, unsigned int, int) {}
-void mcglClear(unsigned int) {}
+void mcglClear(unsigned int mask)
+{
+    // Only clear inside an active render pass on the render thread
+    if (!g_vk.inRenderPass || !g_vk.device) return;
+    VkCommandBuffer cmd = g_vk.commandBuffers[g_vk.currentFrame];
+    if (!cmd) return;
+
+    VkClearAttachment clears[2] = {};
+    uint32_t clearCount = 0;
+    if (mask & 0x00004000) // GL_COLOR_BUFFER_BIT
+    {
+        clears[clearCount].aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        clears[clearCount].clearValue.color = {{ g_vk.clearColor[0], g_vk.clearColor[1], g_vk.clearColor[2], g_vk.clearColor[3] }};
+        clearCount++;
+    }
+    if (mask & 0x00000100) // GL_DEPTH_BUFFER_BIT
+    {
+        clears[clearCount].aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        clears[clearCount].clearValue.depthStencil = { 1.0f, 0 };
+        clearCount++;
+    }
+    if (clearCount == 0) return;
+
+    VkClearRect rect = {};
+    rect.rect = { {0, 0}, g_vk.swapchainExtent };
+    rect.layerCount = 1;
+    vkCmdClearAttachments(cmd, clearCount, clears, 1, &rect);
+}
 void mcglScissor(int, int, int, int) {}
 void mcglDepthMask(unsigned char) {}
 void mcglBlendFunc(unsigned int, unsigned int) {}

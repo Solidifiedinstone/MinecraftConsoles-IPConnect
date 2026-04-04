@@ -222,6 +222,8 @@ VkPipeline vkp_get_pipeline(const VkPipelineKey& key)
     VkPrimitiveTopology topo = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     if (key.topology == 1) topo = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
     else if (key.topology == 2) topo = VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
+    else if (key.topology == 3) topo = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+    else if (key.topology == 4) topo = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN;
 
     VkPipelineInputAssemblyStateCreateInfo inputAssembly = { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
     inputAssembly.topology = topo;

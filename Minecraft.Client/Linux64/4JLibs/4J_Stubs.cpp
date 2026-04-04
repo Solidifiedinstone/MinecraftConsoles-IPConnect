@@ -280,14 +280,15 @@ static void softOrtho(float left, float right, float bottom, float top, float zN
     if (std::fabs(rl) <= 1e-8f || std::fabs(tb) <= 1e-8f || std::fabs(fn) <= 1e-8f)
         return;
 
+    // Left-handed (+Z forward) → Vulkan NDC: depth [0,1], Y-flipped
     float o[16];
     matIdentity(o);
-    o[0] = 2.0f / rl;
-    o[5] = 2.0f / tb;
-    o[10] = -2.0f / fn;
+    o[0]  =  2.0f / rl;
+    o[5]  = -2.0f / tb;              // Y-flip for Vulkan
+    o[10] =  1.0f / fn;              // LH: +Z forward, depth [0,1]
     o[12] = -(right + left) / rl;
-    o[13] = -(top + bottom) / tb;
-    o[14] = -(zFar + zNear) / fn;
+    o[13] =  (top + bottom) / tb;    // Y-flip for Vulkan
+    o[14] = -zNear / fn;             // depth [0,1]
     matPostMul(currentSoftMatrix(), o);
 }
 
@@ -299,15 +300,16 @@ static void softFrustum(float left, float right, float bottom, float top, float 
     if (std::fabs(rl) <= 1e-8f || std::fabs(tb) <= 1e-8f || std::fabs(fn) <= 1e-8f || zNear <= 0.0f || zFar <= 0.0f)
         return;
 
+    // Left-handed (+Z forward) → Vulkan NDC: depth [0,1], Y-flipped
     float f[16];
     memset(f, 0, sizeof(f));
-    f[0] = (2.0f * zNear) / rl;
-    f[5] = (2.0f * zNear) / tb;
-    f[8] = (right + left) / rl;
-    f[9] = (top + bottom) / tb;
-    f[10] = -(zFar + zNear) / fn;
-    f[11] = -1.0f;
-    f[14] = -(2.0f * zFar * zNear) / fn;
+    f[0]  =  (2.0f * zNear) / rl;
+    f[5]  = -(2.0f * zNear) / tb;    // Y-flip for Vulkan
+    f[8]  =  (right + left) / rl;
+    f[9]  = -(top + bottom) / tb;     // Y-flip for Vulkan
+    f[10] =  zFar / fn;               // LH: +Z forward, depth [0,1]
+    f[11] =  1.0f;                     // LH: clip_w = +z_view
+    f[14] = -(zFar * zNear) / fn;     // depth [0,1]
     matPostMul(currentSoftMatrix(), f);
 }
 
@@ -407,14 +409,22 @@ static void mat4Mul(float *out, const float *a, const float *b)
 // Standard vertex layout for Vulkan (matches shader inputs at 32-byte stride)
 struct VkStdVertex { float x, y, z, u, v; uint32_t color; uint32_t _pad0, _pad1; };
 
+static int g_drawCallCount = 0;
+static int g_cbuffCallCount = 0;
+static int g_frameCount = 0;
+static int g_drawsInFrustum = 0;
+static int g_drawsOutFrustum = 0;
+
 static void executeDraw(const DrawCall &call)
 {
     if (call.count <= 0 || call.bytes.empty())
         return;
-    if (!g_vk.inRenderPass)
+    if (!g_vk.inRenderPass || !g_vk.device)
         return;
 
     VkCommandBuffer cmd = vkb_cmd();
+    if (!cmd || !g_vk.stagingMapped[g_vk.currentFrame])
+        return;
 
     // ── Compute MVP ──
     ensureSoftMatrices();
@@ -422,8 +432,11 @@ static void executeDraw(const DrawCall &call)
     float mv[16];
     if (call.hasMatrices)
     {
-        // Display list replay: live modelview * recorded modelview
-        mat4Mul(mv, tl_softMatrices.model, call.modelview);
+        // Display list replay: the recorded modelview already includes the
+        // camera view transform that was active at recording time.
+        // Use it directly — do NOT multiply with the current modelview,
+        // which would double-apply the camera.
+        memcpy(mv, call.modelview, sizeof(mv));
     }
     else
     {
@@ -444,7 +457,9 @@ static void executeDraw(const DrawCall &call)
         else effectiveTextureId = g_sharedTextureId.load(std::memory_order_relaxed);
     }
     memcpy(pc.globalColor, g_renderState.globalColor, sizeof(pc.globalColor));
-    pc.textureEnable   = (g_textureEnabled && effectiveTextureId > 0) ? 1.0f : 0.0f;
+    // Enable texturing whenever we have a valid texture — the g_textureEnabled flag
+    // is unreliable across display list replay boundaries.
+    pc.textureEnable   = (effectiveTextureId > 0) ? 1.0f : 0.0f;
     pc.fogEnable       = g_renderState.fogEnable ? 1.0f : 0.0f;
     pc.fogColor[0]     = g_renderState.fogColor[0];
     pc.fogColor[1]     = g_renderState.fogColor[1];
@@ -565,6 +580,10 @@ static void executeDraw(const DrawCall &call)
         key.topology = 1;
     else if (call.primitive == C4JRender::PRIMITIVE_TYPE_LINE_STRIP)
         key.topology = 2;
+    else if (call.primitive == C4JRender::PRIMITIVE_TYPE_TRIANGLE_STRIP)
+        key.topology = 3;
+    else if (call.primitive == C4JRender::PRIMITIVE_TYPE_TRIANGLE_FAN)
+        key.topology = 4;
 
     VkPipeline pipeline = vkp_get_pipeline(key);
     if (!pipeline) return;
@@ -588,6 +607,30 @@ static void executeDraw(const DrawCall &call)
     vkCmdDraw(cmd, (uint32_t)outCount, 1, 0, 0);
 
     g_vk.stagingOffset = alignedOffset + outBytes;
+    g_drawCallCount++;
+
+    // Frustum check: test first vertex of each draw
+    {
+        float *v0 = (float*)dst;
+        float tw = mvp[3]*v0[0] + mvp[7]*v0[1] + mvp[11]*v0[2] + mvp[15];
+        if (tw > 0.001f) {
+            float tx = mvp[0]*v0[0] + mvp[4]*v0[1] + mvp[8]*v0[2]  + mvp[12];
+            float ty = mvp[1]*v0[0] + mvp[5]*v0[1] + mvp[9]*v0[2]  + mvp[13];
+            float tz = mvp[2]*v0[0] + mvp[6]*v0[1] + mvp[10]*v0[2] + mvp[14];
+            float nx = tx/tw, ny = ty/tw, nz = tz/tw;
+            if (nx >= -1 && nx <= 1 && ny >= -1 && ny <= 1 && nz >= 0 && nz <= 1)
+                g_drawsInFrustum++;
+            else
+                g_drawsOutFrustum++;
+            // Log draws 1, 100, 200, 300, 400, 500 every 120 frames
+            if (g_frameCount % 120 == 1 && (g_drawCallCount <= 2 || g_drawCallCount % 100 == 0))
+                SessionLog_Printf("[vk-draw] #%d prim=%d cnt=%d tex=%d hasMat=%d ndc=(%.3f,%.3f,%.3f) w=%.1f\n",
+                    g_drawCallCount, (int)call.primitive, outCount, effectiveTextureId,
+                    (int)call.hasMatrices, nx, ny, nz, tw);
+        } else {
+            g_drawsOutFrustum++;
+        }
+    }
 }
 
 } // namespace
@@ -598,7 +641,7 @@ void C4JRender::Initialise(void * /*pDevice*/, void * /*pSwapChain*/) { ensureGL
 void C4JRender::InitialiseContext() { ensureGLReady(); }
 void C4JRender::Tick()
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread)
+    if (!ensureGLReady())
         return;
     glfwPollEvents();
     if (glfwWindowShouldClose(g_window))
@@ -611,7 +654,12 @@ void C4JRender::Tick()
 void C4JRender::UpdateGamma(unsigned short /*usGamma*/) {}
 void C4JRender::StartFrame()
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
+    if (!ensureGLReady()) return;
+    // Adopt whichever thread actually calls StartFrame as the render thread.
+    // (The GLFW/Vulkan init may happen on a different thread than rendering.)
+    g_renderThread = std::this_thread::get_id();
+    g_drawCallCount = 0;
+    g_cbuffCallCount = 0;
     if (!vkb_begin_frame())
     {
         // Swapchain out of date or minimized — skip this frame
@@ -620,14 +668,21 @@ void C4JRender::StartFrame()
 }
 void C4JRender::Present()
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread)
+    if (!ensureGLReady())
         return;
+    g_frameCount++;
+    if (g_frameCount % 60 == 1)
+        SessionLog_Printf("[vk-diag] frame %d: %d draws (%d in/%d out frustum) cbuf=%d staging=%llu\n",
+            g_frameCount, g_drawCallCount, g_drawsInFrustum, g_drawsOutFrustum,
+            g_cbuffCallCount, (unsigned long long)g_vk.stagingOffset);
+    g_drawsInFrustum = 0;
+    g_drawsOutFrustum = 0;
     if (g_vk.inRenderPass)
         vkb_end_frame();
 }
 void C4JRender::Clear(int flags, D3D11_RECT *pRect)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread)
+    if (!ensureGLReady())
         return;
 
     unsigned int mask = 0;
@@ -708,7 +763,7 @@ void C4JRender::MatrixPerspective(float fovy, float aspect, float zNear, float z
     const float left = -right;
     softFrustum(left, right, bottom, top, zNear, zFar);
 
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
+    if (!ensureGLReady()) return;
     mcglMatrixMode(mapMatrixMode(tl_softMatrices.mode));
     mcglFrustum((double)left, (double)right, (double)bottom, (double)top, (double)zNear, (double)zFar);
 }
@@ -744,7 +799,7 @@ void C4JRender::MatrixMult(float *mat)
 const float *C4JRender::MatrixGet(int type)
 {
     static thread_local float mat[16];
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread)
+    if (!ensureGLReady())
     {
         memset(mat, 0, sizeof(mat));
         mat[0] = mat[5] = mat[10] = mat[15] = 1.0f;
@@ -793,11 +848,14 @@ void C4JRender::DrawVertices(ePrimitiveType PrimitiveType, int count, void *data
         return;
     }
 
-    // Immediate draw: the GL matrix stack is already correct (set by MatrixTranslate/
-    // MatrixRotate/etc which update both software AND GL matrices). Don't re-apply.
+    // Immediate draw
     call.hasMatrices = false;
 
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread)
+    static int imm = 0;
+    imm++;
+    if (imm <= 5) SessionLog_Printf("[vk-diag] immediate draw #%d count=%d inRP=%d\n", imm, count, (int)g_vk.inRenderPass);
+
+    if (!ensureGLReady())
         return;
     executeDraw(call);
 }
@@ -847,7 +905,7 @@ void C4JRender::CBuffEnd()
 }
 bool C4JRender::CBuffCall(int index, bool /*full*/)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread)
+    if (!ensureGLReady())
         return false;
     std::vector<DrawCall> local;
     {
@@ -856,6 +914,10 @@ bool C4JRender::CBuffCall(int index, bool /*full*/)
         if (it == g_cbuffs.end()) return false;
         local = it->second;
     }
+    g_cbuffCallCount++;
+    if (g_frameCount % 120 == 1 && g_cbuffCallCount <= 3)
+        SessionLog_Printf("[vk-cbuf] CBuffCall #%d idx=%d draws=%d inRP=%d\n",
+            g_cbuffCallCount, index, (int)local.size(), (int)g_vk.inRenderPass);
     int replayTextureId = g_currentTexture;
     if (replayTextureId <= 0)
     {
@@ -892,7 +954,7 @@ void C4JRender::CBuffDeferredModeEnd() {}
 
 int C4JRender::TextureCreate()
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return 0;
+    if (!ensureGLReady()) return 0;
     int id = vkt_create();
     TextureBind(id);
     return id;
@@ -900,14 +962,14 @@ int C4JRender::TextureCreate()
 
 void C4JRender::TextureFree(int idx)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
+    if (!ensureGLReady()) return;
     vkt_free(idx);
 }
 void C4JRender::TextureBind(int idx)
 {
     tl_currentTexture = (idx > 0) ? idx : -1;
     g_sharedTextureId.store(tl_currentTexture, std::memory_order_relaxed);
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
+    if (!ensureGLReady()) return;
     if (idx <= 0) { g_currentTexture = -1; return; }
     g_currentTexture = idx;
     g_textureEnabled = true;
@@ -917,19 +979,19 @@ void C4JRender::TextureSetTextureLevels(int levels) { g_textureLevels = (levels 
 int  C4JRender::TextureGetTextureLevels() { return g_textureLevels; }
 void C4JRender::TextureData(int width, int height, void *data, int level, eTextureFormat /*format*/)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
+    if (!ensureGLReady()) return;
     if (g_currentTexture <= 0 || !data || width <= 0 || height <= 0) return;
     vkt_upload(g_currentTexture, width, height, data, level);
 }
 void C4JRender::TextureDataUpdate(int xoffset, int yoffset, int width, int height, void *data, int level)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
+    if (!ensureGLReady()) return;
     if (g_currentTexture <= 0 || !data || width <= 0 || height <= 0) return;
     vkt_sub_upload(g_currentTexture, xoffset, yoffset, width, height, data, level);
 }
 void C4JRender::TextureSetParam(int param, int value)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
+    if (!ensureGLReady()) return;
     if (g_currentTexture <= 0) return;
     if (param == GL_TEXTURE_MIN_FILTER || param == GL_TEXTURE_MAG_FILTER)
     {
@@ -1196,18 +1258,18 @@ void C4JRender::StateSetVertexTextureUV(float u, float v)
     g_sharedUVU.store(u, std::memory_order_relaxed);
     g_sharedUVV.store(v, std::memory_order_relaxed);
 }
-void C4JRender::StateSetLightColour(int light, float red, float green, float blue) { if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return; float d[4] = {red, green, blue, 1.0f}; mcglLightfv(light == 1 ? 0x4001 : 0x4000, 0x1201, d); }
-void C4JRender::StateSetLightAmbientColour(float red, float green, float blue) { if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return; float a[4] = {red, green, blue, 1.0f}; mcglLightModelfv(0x0B53, a); }
-void C4JRender::StateSetLightDirection(int light, float x, float y, float z) { if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return; float p[4] = {x, y, z, 0.0f}; mcglLightfv(light == 1 ? 0x4001 : 0x4000, 0x1203, p); }
+void C4JRender::StateSetLightColour(int light, float red, float green, float blue) { if (!ensureGLReady()) return; float d[4] = {red, green, blue, 1.0f}; mcglLightfv(light == 1 ? 0x4001 : 0x4000, 0x1201, d); }
+void C4JRender::StateSetLightAmbientColour(float red, float green, float blue) { if (!ensureGLReady()) return; float a[4] = {red, green, blue, 1.0f}; mcglLightModelfv(0x0B53, a); }
+void C4JRender::StateSetLightDirection(int light, float x, float y, float z) { if (!ensureGLReady()) return; float p[4] = {x, y, z, 0.0f}; mcglLightfv(light == 1 ? 0x4001 : 0x4000, 0x1203, p); }
 void C4JRender::StateSetLightEnable(int light, bool enable)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
+    if (!ensureGLReady()) return;
     unsigned int l = (light == 1) ? 0x4001 : 0x4000;
     if (enable) mcglEnable(l); else mcglDisable(l);
 }
 void C4JRender::StateSetViewport(eViewportType viewportType)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
+    if (!ensureGLReady()) return;
     int x = 0, y = 0, w = g_iScreenWidth, h = g_iScreenHeight;
     switch (viewportType)
     {

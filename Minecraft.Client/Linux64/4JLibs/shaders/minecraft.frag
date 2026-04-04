@@ -21,7 +21,7 @@ layout(location = 0) out vec4 fragColor;
 
 void main() {
     vec4 texColor = (pc.textureEnable > 0.5) ? texture(texSampler, v_uv) : vec4(1.0);
-    vec4 color = texColor * v_color;
+    vec4 color = texColor * v_color * pc.globalColor;
 
     // Alpha test
     if (pc.alphaTestEnable > 0.5 && color.a <= pc.alphaRef)
