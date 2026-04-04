@@ -82,7 +82,23 @@ static bool createSwapchain()
     ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     ci.preTransform     = caps.currentTransform;
     ci.compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-    ci.presentMode      = VK_PRESENT_MODE_FIFO_KHR; // vsync
+    // Pick best available present mode: IMMEDIATE > MAILBOX > FIFO
+    VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
+    {
+        uint32_t modeCount = 0;
+        vkGetPhysicalDeviceSurfacePresentModesKHR(g_vk.physicalDevice, g_vk.surface, &modeCount, nullptr);
+        std::vector<VkPresentModeKHR> modes(modeCount);
+        vkGetPhysicalDeviceSurfacePresentModesKHR(g_vk.physicalDevice, g_vk.surface, &modeCount, modes.data());
+        for (auto m : modes) {
+            if (m == VK_PRESENT_MODE_IMMEDIATE_KHR) { presentMode = m; break; }
+            if (m == VK_PRESENT_MODE_MAILBOX_KHR && presentMode != VK_PRESENT_MODE_IMMEDIATE_KHR)
+                presentMode = m;
+        }
+        const char* modeNames[] = {"IMMEDIATE","MAILBOX","FIFO","FIFO_RELAXED"};
+        SessionLog_Printf("[vk] Present mode: %s (%d)\n",
+            (int)presentMode < 4 ? modeNames[(int)presentMode] : "unknown", (int)presentMode);
+    }
+    ci.presentMode      = presentMode;
     ci.clipped          = VK_TRUE;
     ci.oldSwapchain     = g_vk.swapchain;
 
@@ -177,24 +193,9 @@ bool vkb_init(GLFWwindow* window)
     const char** glfwExts = glfwGetRequiredInstanceExtensions(&glfwExtCount);
     std::vector<const char*> extensions(glfwExts, glfwExts + glfwExtCount);
 
-    // Try to enable validation layers in debug builds
+    // Validation layers disabled — causes ~1s Present() stalls via vkQueuePresentKHR
     const char* validationLayer = "VK_LAYER_KHRONOS_validation";
     bool hasValidation = false;
-#ifndef NDEBUG
-    uint32_t layerCount = 0;
-    vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
-    std::vector<VkLayerProperties> layers(layerCount);
-    vkEnumerateInstanceLayerProperties(&layerCount, layers.data());
-    for (auto& l : layers)
-    {
-        if (strcmp(l.layerName, validationLayer) == 0)
-        {
-            hasValidation = true;
-            extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-            break;
-        }
-    }
-#endif
 
     VkInstanceCreateInfo ici = { VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
     ici.pApplicationInfo        = &appInfo;
@@ -531,6 +532,9 @@ void vkb_end_frame()
     int f = g_vk.currentFrame;
     VkCommandBuffer cmd = g_vk.commandBuffers[f];
 
+    struct timespec t0, t1, t2, t3;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+
     if (g_vk.inRenderPass)
     {
         vkCmdEndRenderPass(cmd);
@@ -538,6 +542,8 @@ void vkb_end_frame()
     }
 
     vkEndCommandBuffer(cmd);
+
+    clock_gettime(CLOCK_MONOTONIC, &t1);
 
     // Submit
     VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -556,6 +562,8 @@ void vkb_end_frame()
         SessionLog_Printf("[vk] vkQueueSubmit failed: %d\n", (int)submitResult);
     }
 
+    clock_gettime(CLOCK_MONOTONIC, &t2);
+
     // Present
     VkPresentInfoKHR pi = { VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
     pi.waitSemaphoreCount = 1;
@@ -567,6 +575,18 @@ void vkb_end_frame()
     VkResult result = vkQueuePresentKHR(g_vk.graphicsQueue, &pi);
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
         g_vk.swapchainDirty = true;
+
+    clock_gettime(CLOCK_MONOTONIC, &t3);
+
+    static int s_endFrameCount = 0;
+    if (++s_endFrameCount % 30 == 1)
+    {
+        auto ms = [](struct timespec &a, struct timespec &b) -> double {
+            return (b.tv_sec - a.tv_sec) * 1000.0 + (b.tv_nsec - a.tv_nsec) / 1e6;
+        };
+        SessionLog_Printf("[vk-timing] endFrame: cmdEnd=%.1f submit=%.1f present=%.1fms\n",
+            ms(t0, t1), ms(t1, t2), ms(t2, t3));
+    }
 
     g_vk.currentFrame = (f + 1) % VKB_MAX_FRAMES_IN_FLIGHT;
 }

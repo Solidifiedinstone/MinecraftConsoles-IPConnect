@@ -686,7 +686,7 @@ void C4JRender::Present()
     if (!ensureGLReady())
         return;
     g_frameCount++;
-    if (g_frameCount % 60 == 1)
+    if (g_frameCount % 30 == 1)
         SessionLog_Printf("[vk-diag] frame %d: %d draws (%d in/%d out frustum) cbuf=%d staging=%llu\n",
             g_frameCount, g_drawCallCount, g_drawsInFrustum, g_drawsOutFrustum,
             g_cbuffCallCount, (unsigned long long)g_vk.stagingOffset);

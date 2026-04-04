@@ -493,8 +493,12 @@ int main(int argc, char* argv[])
 	}
 
 	// Main game loop
+	static int s_loopFrameNum = 0;
 	while (!app.m_bShutdown)
 	{
+		struct timespec ts_start, ts_mid, ts_end;
+		clock_gettime(CLOCK_MONOTONIC, &ts_start);
+
 		RenderManager.StartFrame();
 		app.UpdateTime();
 
@@ -527,17 +531,49 @@ int main(int argc, char* argv[])
 			pMinecraft->run_middle();
 		}
 
+		clock_gettime(CLOCK_MONOTONIC, &ts_mid);
+
 		pMinecraft->soundEngine->playMusicTick();
 
+		struct timespec ts_snd;
+		clock_gettime(CLOCK_MONOTONIC, &ts_snd);
+
 		ui.tick();
+
+		struct timespec ts_uitick;
+		clock_gettime(CLOCK_MONOTONIC, &ts_uitick);
+
 		ui.render();
+
+		struct timespec ts_uirender;
+		clock_gettime(CLOCK_MONOTONIC, &ts_uirender);
 
 		RenderManager.Present();
 
+		clock_gettime(CLOCK_MONOTONIC, &ts_end);
+
+		s_loopFrameNum++;
+		if (s_loopFrameNum % 30 == 1)
+		{
+			auto ms = [](struct timespec &a, struct timespec &b) -> double {
+				return (b.tv_sec - a.tv_sec) * 1000.0 + (b.tv_nsec - a.tv_nsec) / 1e6;
+			};
+			SessionLog_Printf("[loop-timing] frame %d: game=%.1f snd=%.1f uitick=%.1f uirender=%.1f present=%.1f total=%.1fms\n",
+				s_loopFrameNum, ms(ts_start, ts_mid), ms(ts_mid, ts_snd), ms(ts_snd, ts_uitick),
+				ms(ts_uitick, ts_uirender), ms(ts_uirender, ts_end), ms(ts_start, ts_end));
+		}
+
 		ui.CheckMenuDisplayed();
 
-		// Small sleep to avoid spinning the CPU
-		usleep(1000); // 1ms
+		// Frame rate limiter: cap at ~60 FPS to avoid burning CPU/GPU
+		{
+			struct timespec ts_now;
+			clock_gettime(CLOCK_MONOTONIC, &ts_now);
+			double frameMs = (ts_now.tv_sec - ts_start.tv_sec) * 1000.0 + (ts_now.tv_nsec - ts_start.tv_nsec) / 1e6;
+			double targetMs = 16.0; // ~60 FPS
+			if (frameMs < targetMs)
+				usleep((useconds_t)((targetMs - frameMs) * 1000.0));
+		}
 	}
 
 	if (g_signalReceived)
