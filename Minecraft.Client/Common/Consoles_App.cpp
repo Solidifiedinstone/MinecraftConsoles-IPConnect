@@ -822,6 +822,10 @@ void CMinecraftApp::InitGameSettings()
 		SetDefaultOptions(pProfileSettings,i);
 		Win64_LoadSettings(GameSettingsA[i]);
 		ApplyGameSettingsChanged(i);
+#elif defined _LINUX64
+		// Set essential display defaults without full settings init
+		SetGameSettings(i, eGameSetting_DisplayHUD, 1);
+		SetGameSettings(i, eGameSetting_DisplayHand, 1);
 #elif defined __PS3__ || defined __ORBIS__ || defined _DURANGO  || defined __PSVITA__
 		C4JStorage::PROFILESETTINGS *pProfileSettings=StorageManager.GetDashboardProfileSettings(i);
 		// 4J-PB - don't cause an options write to happen here

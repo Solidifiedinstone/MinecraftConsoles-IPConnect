@@ -31,11 +31,7 @@
 
 ResourceLocation Gui::PUMPKIN_BLUR_LOCATION = ResourceLocation(TN__BLUR__MISC_PUMPKINBLUR);
 
-#define RENDER_HUD 0
-//#ifndef _XBOX
-//#undef RENDER_HUD
-//#define RENDER_HUD 1
-//#endif
+#define RENDER_HUD 1
 
 float Gui::currentGuiBlendFactor = 1.0f;	// 4J added
 float Gui::currentGuiScaleFactor = 1.0f;	// 4J added
@@ -311,7 +307,7 @@ void Gui::render(float a, bool mouseFree, int xMouse, int yMouse)
 		if(bDisplayGui)
 		{
 			MemSect(31);
-			minecraft->textures->bindTexture(TN_GUI_GUI);	// 4J was L"/gui/gui.png"
+			glBindTexture(GL_TEXTURE_2D, minecraft->textures->loadTexture(TN_GUI_GUI));	// 4J was L"/gui/gui.png"
 			MemSect(0);
 
 			shared_ptr<Inventory> inventory = minecraft->player->inventory;
@@ -335,7 +331,7 @@ void Gui::render(float a, bool mouseFree, int xMouse, int yMouse)
 
 
 			MemSect(31);
-			minecraft->textures->bindTexture(TN_GUI_ICONS);//L"/gui/icons.png"));
+			glBindTexture(GL_TEXTURE_2D, minecraft->textures->loadTexture(TN_GUI_ICONS));//L"/gui/icons.png"));
 			MemSect(0);
 			glEnable(GL_BLEND);
 			RenderManager.StateSetBlendFactor(0xffffff |(((unsigned int)fVal)<<24));
@@ -377,7 +373,9 @@ void Gui::render(float a, bool mouseFree, int xMouse, int yMouse)
 
 		/////////////////////////////////////////////////////////////////////////////////////
 		// Display the experience, food, armour, health and the air bubbles
+		// TODO: Port health/armor/food rendering from Java to C++
 		/////////////////////////////////////////////////////////////////////////////////////
+#if 0 // Health/armor/food HUD — needs Java→C++ port
 		if(bDisplayGui)
 		{
 			// 4J - added blend for fading gui
@@ -646,6 +644,7 @@ void Gui::render(float a, bool mouseFree, int xMouse, int yMouse)
 			Lighting::turnOff();
 			glDisable(GL_RESCALE_NORMAL);
 		}
+#endif // Health/armor/food HUD
 #endif // RENDER_HUD
 
 		// 4J - do render of crouched player. This code is largely taken from the inventory render of the player, with some special hard-coded positions

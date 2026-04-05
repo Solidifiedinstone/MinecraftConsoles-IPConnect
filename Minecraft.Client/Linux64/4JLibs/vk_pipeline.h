@@ -26,16 +26,23 @@ static_assert(sizeof(VkPushConstants) == 128, "Push constants must be exactly 12
 // Pipeline key — packed static state that requires different pipeline objects.
 struct VkPipelineKey
 {
-    uint8_t blendEnable   : 1;
-    uint8_t srcBlend      : 4; // VkBlendFactor (first 16 values cover all used)
-    uint8_t dstBlend      : 4; // VkBlendFactor
-    uint8_t topology      : 3; // 0=tri list, 1=line list, 2=line strip, 3=tri strip, 4=tri fan
-    uint8_t colorWriteMask: 4; // RGBA bits
+    uint8_t blendEnable    : 1;
+    uint8_t srcBlend       : 4; // VkBlendFactor (first 16 values cover all used)
+    uint8_t dstBlend       : 4; // VkBlendFactor
+    uint8_t topology       : 3; // 0=tri list, 1=line list, 2=line strip, 3=tri strip, 4=tri fan
+    uint8_t colorWriteMask : 4; // RGBA bits
+    uint8_t depthTestEnable  : 1;
+    uint8_t depthWriteEnable : 1;
 
-    bool operator==(const VkPipelineKey& o) const { return *(uint16_t*)this == *(uint16_t*)&o; }
+    uint32_t pack() const {
+        return (uint32_t)blendEnable | ((uint32_t)srcBlend << 1) | ((uint32_t)dstBlend << 5) |
+               ((uint32_t)topology << 9) | ((uint32_t)colorWriteMask << 12) |
+               ((uint32_t)depthTestEnable << 16) | ((uint32_t)depthWriteEnable << 17);
+    }
+    bool operator==(const VkPipelineKey& o) const { return pack() == o.pack(); }
 };
 struct VkPipelineKeyHash {
-    size_t operator()(const VkPipelineKey& k) const { return *(uint16_t*)&k; }
+    size_t operator()(const VkPipelineKey& k) const { return k.pack(); }
 };
 
 struct VkPipelineState

@@ -432,6 +432,7 @@ static void executeDraw(const DrawCall &call)
 
     // ── Compute MVP ──
     ensureSoftMatrices();
+
     float mvp[16];
     float mv[16];
     if (call.hasMatrices)
@@ -582,10 +583,12 @@ static void executeDraw(const DrawCall &call)
 
     // ── Bind pipeline ──
     VkPipelineKey key = vkp_default_key();
-    key.blendEnable    = g_renderState.blendEnable ? 1 : 0;
-    key.srcBlend       = g_renderState.blendSrc & 0xF;
-    key.dstBlend       = g_renderState.blendDst & 0xF;
-    key.colorWriteMask = g_renderState.colorWriteMask & 0xF;
+    key.blendEnable      = g_renderState.blendEnable ? 1 : 0;
+    key.srcBlend         = g_renderState.blendSrc & 0xF;
+    key.dstBlend         = g_renderState.blendDst & 0xF;
+    key.colorWriteMask   = g_renderState.colorWriteMask & 0xF;
+    key.depthTestEnable  = 1;
+    key.depthWriteEnable = 1;
     if (call.primitive == C4JRender::PRIMITIVE_TYPE_LINE_LIST)
         key.topology = 1;
     else if (call.primitive == C4JRender::PRIMITIVE_TYPE_LINE_STRIP)
@@ -892,11 +895,12 @@ void C4JRender::CBuffStart(int index, bool /*full*/)
     ensureSoftMatrices();
     memcpy(tl_savedModelForRecording, tl_softMatrices.model, sizeof(tl_savedModelForRecording));
     matIdentity(tl_softMatrices.model);
-    if (tl_currentTexture <= 0)
-    {
-        if (g_currentTexture > 0) tl_currentTexture = g_currentTexture;
-        else tl_currentTexture = g_sharedTextureId.load(std::memory_order_relaxed);
-    }
+    // Don't inherit texture from render thread — display list draws should
+    // use whatever texture is current at replay time (set by the caller before
+    // CBuffCall), matching OpenGL display list semantics where texture binds
+    // are NOT recorded.  The old code captured g_currentTexture here, which
+    // raced with the render thread and could lock in the wrong texture
+    // (e.g. GUI icons) for all subsequent chunk compilations.
 }
 void C4JRender::CBuffClear(int index) { std::lock_guard<std::mutex> lock(g_cbuffMutex); g_cbuffs[index].clear(); }
 int  C4JRender::CBuffSize(int index) { std::lock_guard<std::mutex> lock(g_cbuffMutex); return (int)g_cbuffs[index].size(); }
@@ -1196,15 +1200,17 @@ void C4JRender::StateSetBlendFunc(int src, int dst)
     // Map engine blend constants to VkBlendFactor values
     auto mapToVk = [](int f) -> int {
         switch (f) {
-        case GL_ZERO: return 0;                          // VK_BLEND_FACTOR_ZERO
-        case GL_ONE:  return 1;                          // VK_BLEND_FACTOR_ONE
-        case GL_SRC_COLOR: return 3;                     // VK_BLEND_FACTOR_SRC_COLOR
-        case GL_ONE_MINUS_SRC_COLOR: return 4;           // VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR
-        case GL_DST_COLOR: return 5;                     // VK_BLEND_FACTOR_DST_COLOR
-        case GL_ONE_MINUS_DST_COLOR: return 6;           // VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR
-        case GL_SRC_ALPHA: return 7;                     // VK_BLEND_FACTOR_SRC_ALPHA  (was 6 in old enum)
-        case GL_ONE_MINUS_SRC_ALPHA: return 8;           // VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
-        case GL_DST_ALPHA: return 9;                     // VK_BLEND_FACTOR_DST_ALPHA
+        case GL_ZERO:                    return 0;   // VK_BLEND_FACTOR_ZERO
+        case GL_ONE:                     return 1;   // VK_BLEND_FACTOR_ONE
+        case GL_SRC_COLOR:               return 2;   // VK_BLEND_FACTOR_SRC_COLOR
+        case GL_ONE_MINUS_SRC_COLOR:     return 3;   // VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR
+        case GL_DST_COLOR:               return 4;   // VK_BLEND_FACTOR_DST_COLOR
+        case GL_ONE_MINUS_DST_COLOR:     return 5;   // VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR
+        case GL_SRC_ALPHA:               return 6;   // VK_BLEND_FACTOR_SRC_ALPHA
+        case GL_ONE_MINUS_SRC_ALPHA:     return 7;   // VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
+        case GL_DST_ALPHA:               return 8;   // VK_BLEND_FACTOR_DST_ALPHA
+        case GL_CONSTANT_ALPHA:          return 12;  // VK_BLEND_FACTOR_CONSTANT_ALPHA
+        case GL_ONE_MINUS_CONSTANT_ALPHA: return 13; // VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA
         default: return 1;
         }
     };
