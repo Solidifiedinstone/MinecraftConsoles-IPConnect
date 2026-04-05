@@ -37,6 +37,9 @@ void vkt_set_filter(int id, bool linear);
 // Get the VkDescriptorSet for a texture (for binding before draw).
 VkDescriptorSet vkt_get_descriptor(int id);
 
+// Flush all pending sub-uploads in one batch (call once per frame, before rendering).
+void vkt_flush_uploads();
+
 // Lifecycle
 void vkt_init();
 void vkt_cleanup();

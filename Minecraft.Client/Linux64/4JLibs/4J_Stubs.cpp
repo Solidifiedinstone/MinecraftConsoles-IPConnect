@@ -92,6 +92,13 @@ thread_local int tl_currentTexture = -1;
 thread_local bool tl_nextDrawHasVertexColor = true; // set by Tesselator before DrawVertices
 thread_local float tl_savedModelForRecording[16]; // saved MV at CBuffStart for restore at CBuffEnd
 
+// Scroll callback for input (must be defined before ensureGLReady)
+static float s_scrollAccum = 0;
+static void inputScrollCallback(GLFWwindow*, double /*xoff*/, double yoff)
+{
+    s_scrollAccum += (float)yoff;
+}
+
 // ── Render state for Vulkan pipeline selection + push constants ──
 struct RenderState {
     bool   blendEnable = false;
@@ -163,6 +170,15 @@ static void decode565(unsigned short packed, unsigned char &r, unsigned char &g,
     g = (unsigned char)((((packed >> 5) & 0x3F) * 255 + 31) / 63);
     b = (unsigned char)(((packed & 0x1F) * 255 + 15) / 31);
 }
+
+// Overworld brightness ramp: ramp[i] = (i/15) / (3*(1-i/15) + 1), ambientLight=0
+// Maps light level 0-15 to brightness 0.0-1.0
+static const float s_brightnessRamp[16] = {
+    0.0f,      0.01754f, 0.03704f, 0.05882f,
+    0.08333f,  0.11111f, 0.14286f, 0.17949f,
+    0.22222f,  0.27273f, 0.33333f, 0.40741f,
+    0.50000f,  0.61905f, 0.77778f, 1.00000f
+};
 
 static void matIdentity(float m[16])
 {
@@ -378,6 +394,9 @@ static bool ensureGLReady()
         return false;
     }
 
+    // Set up input callbacks now that window exists
+    glfwSetScrollCallback(g_window, inputScrollCallback);
+
     g_renderThread = std::this_thread::get_id();
     g_glReady.store(true, std::memory_order_release);
     return true;
@@ -418,6 +437,21 @@ static int g_cbuffCallCount = 0;
 static int g_frameCount = 0;
 static int g_drawsInFrustum = 0;
 static int g_drawsOutFrustum = 0;
+static int g_drawsWithFog = 0;
+static int g_subUploadCount = 0; // texture sub-uploads this frame
+static int g_fullUploadCount = 0; // full texture uploads this frame (blocking)
+
+static int g_compressedDraws = 0, g_standardDraws = 0;
+static int g_texturedDraws = 0, g_untexturedDraws = 0;
+
+// Wall-clock diagnostic timer (logs every 2 seconds instead of every N frames)
+static double g_diagLastTime = 0.0;
+static int g_diagFrameAccum = 0;
+
+// Per-frame timing (milliseconds)
+static double g_timeFlush = 0, g_timeBeginFrame = 0, g_timeDraw = 0, g_timeEndFrame = 0;
+static double g_startFrameEndTime = 0; // timestamp when StartFrame finished
+static int g_pipelineCreates = 0; // pipeline cache misses this frame
 
 static void executeDraw(const DrawCall &call)
 {
@@ -425,6 +459,8 @@ static void executeDraw(const DrawCall &call)
         return;
     if (!g_vk.inRenderPass || !g_vk.device)
         return;
+    if (call.vtype == C4JRender::VERTEX_TYPE_COMPRESSED) g_compressedDraws++;
+    else g_standardDraws++;
 
     VkCommandBuffer cmd = vkb_cmd();
     if (!cmd || !g_vk.stagingMapped[g_vk.currentFrame])
@@ -479,6 +515,7 @@ static void executeDraw(const DrawCall &call)
     // is unreliable across display list replay boundaries.
     pc.textureEnable   = (effectiveTextureId > 0) ? 1.0f : 0.0f;
     pc.fogEnable       = g_renderState.fogEnable ? 1.0f : 0.0f;
+    if (g_renderState.fogEnable) g_drawsWithFog++;
     pc.fogColor[0] = g_renderState.fogColor[0];
     pc.fogColor[1] = g_renderState.fogColor[1];
     pc.fogColor[2] = g_renderState.fogColor[2];
@@ -530,6 +567,20 @@ static void executeDraw(const DrawCall &call)
             unsigned short packed = (unsigned short)(((int)s[3] + 32768) & 0xFFFF);
             unsigned char r, g, b;
             decode565(packed, r, g, b);
+
+            // Lightmap brightness from s[6]=blockLight*16, s[7]=skyLight*16
+            int blockLight = (s[6] >> 4) & 0xF;
+            int skyLight   = (s[7] >> 4) & 0xF;
+            float skyBr   = s_brightnessRamp[skyLight];
+            float blockBr = s_brightnessRamp[blockLight] * 1.5f;
+            float bright  = skyBr + blockBr;
+            if (bright > 1.0f) bright = 1.0f;
+            bright = bright * 0.96f + 0.03f; // match lightmap post-processing
+
+            r = (unsigned char)(r * bright);
+            g = (unsigned char)(g * bright);
+            b = (unsigned char)(b * bright);
+
             oc = ((uint32_t)r << 24) | ((uint32_t)g << 16) | ((uint32_t)b << 8) | 0xFF;
         };
 
@@ -588,14 +639,46 @@ static void executeDraw(const DrawCall &call)
             memcpy(dst + i * 32 + 20, &white, 4);
     }
 
+    // Apply lightmap brightness from _tex2 field (byte offset 28) for standard format.
+    // _tex2 = skyLight << 20 | blockLight << 4.  Value 0xfe00fe00 means "no lightmap".
+    if (!isCompressed && call.useVertexColor)
+    {
+        for (int i = 0; i < outCount; i++)
+        {
+            uint32_t tex2;
+            memcpy(&tex2, dst + i * 32 + 28, 4);
+            if (tex2 == 0xfe00fe00u) continue; // no lightmap data
+
+            int skyLight   = (tex2 >> 20) & 0xF;
+            int blockLight = (tex2 >> 4) & 0xF;
+            float skyBr   = s_brightnessRamp[skyLight];
+            float blockBr = s_brightnessRamp[blockLight] * 1.5f;
+            float bright  = skyBr + blockBr;
+            if (bright > 1.0f) bright = 1.0f;
+            bright = bright * 0.96f + 0.03f;
+
+            uint32_t col;
+            memcpy(&col, dst + i * 32 + 20, 4);
+            unsigned char r = (col >> 24) & 0xFF;
+            unsigned char g = (col >> 16) & 0xFF;
+            unsigned char b = (col >> 8)  & 0xFF;
+            unsigned char a = col & 0xFF;
+            r = (unsigned char)(r * bright);
+            g = (unsigned char)(g * bright);
+            b = (unsigned char)(b * bright);
+            col = ((uint32_t)r << 24) | ((uint32_t)g << 16) | ((uint32_t)b << 8) | a;
+            memcpy(dst + i * 32 + 20, &col, 4);
+        }
+    }
+
     // ── Bind pipeline ──
     VkPipelineKey key = vkp_default_key();
     key.blendEnable      = g_renderState.blendEnable ? 1 : 0;
     key.srcBlend         = g_renderState.blendSrc & 0xF;
     key.dstBlend         = g_renderState.blendDst & 0xF;
     key.colorWriteMask   = g_renderState.colorWriteMask & 0xF;
-    key.depthTestEnable  = 1;
-    key.depthWriteEnable = 1;
+    key.depthTestEnable  = g_renderState.depthTestEnable ? 1 : 0;
+    key.depthWriteEnable = g_renderState.depthWriteEnable ? 1 : 0;
     if (call.primitive == C4JRender::PRIMITIVE_TYPE_LINE_LIST)
         key.topology = 1;
     else if (call.primitive == C4JRender::PRIMITIVE_TYPE_LINE_STRIP)
@@ -617,6 +700,8 @@ static void executeDraw(const DrawCall &call)
     VkDescriptorSet texDesc = (effectiveTextureId > 0)
         ? vkt_get_descriptor(effectiveTextureId)
         : g_pipe.whiteTexDescSet;
+    if (effectiveTextureId > 0) g_texturedDraws++;
+    else g_untexturedDraws++;
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
         g_pipe.pipelineLayout, 0, 1, &texDesc, 0, nullptr);
 
@@ -676,25 +761,63 @@ void C4JRender::StartFrame()
     g_renderThread = std::this_thread::get_id();
     g_drawCallCount = 0;
     g_cbuffCallCount = 0;
+    g_subUploadCount = 0;
+    g_fullUploadCount = 0;
+    g_timeDraw = 0;
+
+    // Flush any pending texture sub-uploads (from animated textures last frame)
+    // BEFORE beginning the render pass, so the GPU does all transfers in one batch.
+    double t0 = glfwGetTime();
+    vkt_flush_uploads();
+    g_timeFlush = (glfwGetTime() - t0) * 1000.0;
+
+    double t1 = glfwGetTime();
     if (!vkb_begin_frame())
     {
         // Swapchain out of date or minimized — skip this frame
         g_vk.inRenderPass = false;
     }
+    g_timeBeginFrame = (glfwGetTime() - t1) * 1000.0;
+    g_startFrameEndTime = glfwGetTime();
 }
 void C4JRender::Present()
 {
     if (!ensureGLReady())
         return;
+    g_timeDraw = (glfwGetTime() - g_startFrameEndTime) * 1000.0;
     g_frameCount++;
-    if (g_frameCount % 300 == 1)
-        SessionLog_Printf("[vk-diag] frame %d: %d draws (%d in/%d out frustum) cbuf=%d staging=%llu\n",
+    g_diagFrameAccum++;
+
+    // Log diagnostics every 2 seconds by wall clock (not frame count).
+    // This ensures we see output even at very low FPS.
+    double now = glfwGetTime();
+    if (g_diagLastTime == 0.0) g_diagLastTime = now;
+    if (now - g_diagLastTime >= 2.0)
+    {
+        double elapsed = now - g_diagLastTime;
+        int fps = (elapsed > 0.0) ? (int)(g_diagFrameAccum / elapsed + 0.5) : 0;
+        SessionLog_Printf("[vk-diag] frame %d: %d draws (%d in/%d out) cbuf=%d tex=%d/%d texUp=%d fullUp=%d FPS=%d  flush=%.1fms begin=%.1fms draw=%.1fms end=%.1fms\n",
             g_frameCount, g_drawCallCount, g_drawsInFrustum, g_drawsOutFrustum,
-            g_cbuffCallCount, (unsigned long long)g_vk.stagingOffset);
+            g_cbuffCallCount,
+            g_texturedDraws, g_untexturedDraws,
+            g_subUploadCount, g_fullUploadCount, fps,
+            g_timeFlush, g_timeBeginFrame, g_timeDraw, g_timeEndFrame);
+        g_diagLastTime = now;
+        g_diagFrameAccum = 0;
+    }
+
     g_drawsInFrustum = 0;
     g_drawsOutFrustum = 0;
-    if (g_vk.inRenderPass)
+    g_drawsWithFog = 0;
+    g_compressedDraws = 0;
+    g_standardDraws = 0;
+    g_texturedDraws = 0;
+    g_untexturedDraws = 0;
+    if (g_vk.inRenderPass) {
+        double t2 = glfwGetTime();
         vkb_end_frame();
+        g_timeEndFrame = (glfwGetTime() - t2) * 1000.0;
+    }
 }
 void C4JRender::Clear(int flags, D3D11_RECT *pRect)
 {
@@ -999,12 +1122,14 @@ void C4JRender::TextureData(int width, int height, void *data, int level, eTextu
     if (!ensureGLReady()) return;
     if (g_currentTexture <= 0 || !data || width <= 0 || height <= 0) return;
     vkt_upload(g_currentTexture, width, height, data, level);
+    g_fullUploadCount++;
 }
 void C4JRender::TextureDataUpdate(int xoffset, int yoffset, int width, int height, void *data, int level)
 {
     if (!ensureGLReady()) return;
     if (g_currentTexture <= 0 || !data || width <= 0 || height <= 0) return;
     vkt_sub_upload(g_currentTexture, xoffset, yoffset, width, height, data, level);
+    g_subUploadCount++;
 }
 void C4JRender::TextureSetParam(int param, int value)
 {
@@ -1330,50 +1455,237 @@ void C4JRender::Resume() {}
 
 /* ********************************************************************
  *
- *  C_4JInput  --  Input Manager stubs
+ *  C_4JInput  --  Keyboard/mouse → virtual gamepad input
  *
  * ********************************************************************/
 
-void C_4JInput::Initialise(int /*iInputStateC*/, unsigned char /*ucMapC*/, unsigned char /*ucActionC*/, unsigned char /*ucMenuActionC*/) {}
-void C_4JInput::Tick() {}
-void C_4JInput::SetDeadzoneAndMovementRange(unsigned int /*uiDeadzone*/, unsigned int /*uiMovementRangeMax*/) {}
+// --- Input state ---
+static uint32_t s_joypadMaps[3][64] = {};   // maps[mapStyle][action] = button bitmask
+static uint8_t  s_padMapStyle[4] = {};       // which map style each pad uses
+static uint32_t s_buttons     = 0;           // current frame virtual button bitmask
+static uint32_t s_buttonsPrev = 0;           // previous frame for edge detection
+static float    s_stickLX = 0, s_stickLY = 0;
+static float    s_stickRX = 0, s_stickRY = 0;
+static uint8_t  s_triggerL = 0, s_triggerR = 0;
+static bool     s_mouseCaptured = false;
+static double   s_lastMouseX = 0, s_lastMouseY = 0;
+static bool     s_firstMouse = true;
+static bool     s_menuDisplayed = false;
+static float    s_mouseSensitivity = 0.06f;
 
-void         C_4JInput::SetGameJoypadMaps(unsigned char /*ucMap*/, unsigned char /*ucAction*/, unsigned int /*uiActionVal*/) {}
-unsigned int C_4JInput::GetGameJoypadMaps(unsigned char /*ucMap*/, unsigned char /*ucAction*/) { return 0; }
+void C_4JInput::Initialise(int, unsigned char, unsigned char, unsigned char)
+{
+    if (g_window)
+        glfwSetScrollCallback(g_window, inputScrollCallback);
+}
 
-void          C_4JInput::SetJoypadMapVal(int /*iPad*/, unsigned char /*ucMap*/) {}
-unsigned char C_4JInput::GetJoypadMapVal(int /*iPad*/) { return 0; }
+void C_4JInput::Tick()
+{
+    if (!g_window) return;
 
-void C_4JInput::SetJoypadSensitivity(int /*iPad*/, float /*fSensitivity*/) {}
+    s_buttonsPrev = s_buttons;
+    s_buttons = 0;
+    s_stickLX = s_stickLY = 0;
+    s_stickRX = s_stickRY = 0;
+    s_triggerL = s_triggerR = 0;
 
-unsigned int C_4JInput::GetValue(int /*iPad*/, unsigned char /*ucAction*/, bool /*bRepeat*/) { return 0; }
+    // --- WASD → left stick + digital stick buttons ---
+    if (glfwGetKey(g_window, GLFW_KEY_W) == GLFW_PRESS) {
+        s_buttons |= _360_JOY_BUTTON_LSTICK_UP;
+        s_stickLY += 1.0f;
+    }
+    if (glfwGetKey(g_window, GLFW_KEY_S) == GLFW_PRESS) {
+        s_buttons |= _360_JOY_BUTTON_LSTICK_DOWN;
+        s_stickLY -= 1.0f;
+    }
+    if (glfwGetKey(g_window, GLFW_KEY_A) == GLFW_PRESS) {
+        s_buttons |= _360_JOY_BUTTON_LSTICK_LEFT;
+        s_stickLX -= 1.0f;
+    }
+    if (glfwGetKey(g_window, GLFW_KEY_D) == GLFW_PRESS) {
+        s_buttons |= _360_JOY_BUTTON_LSTICK_RIGHT;
+        s_stickLX += 1.0f;
+    }
+    // Clamp diagonal movement
+    float stickLen = s_stickLX * s_stickLX + s_stickLY * s_stickLY;
+    if (stickLen > 1.0f) {
+        float inv = 1.0f / sqrtf(stickLen);
+        s_stickLX *= inv;
+        s_stickLY *= inv;
+    }
 
-bool C_4JInput::ButtonPressed(int /*iPad*/, unsigned char /*ucAction*/)  { return false; }
-bool C_4JInput::ButtonReleased(int /*iPad*/, unsigned char /*ucAction*/) { return false; }
-bool C_4JInput::ButtonDown(int /*iPad*/, unsigned char /*ucAction*/)     { return false; }
+    // --- Mouse → right stick (camera look) ---
+    if (s_mouseCaptured) {
+        double mx, my;
+        glfwGetCursorPos(g_window, &mx, &my);
+        if (!s_firstMouse) {
+            float dx = (float)(mx - s_lastMouseX) * s_mouseSensitivity;
+            float dy = (float)(my - s_lastMouseY) * s_mouseSensitivity;
+            // Clamp to -1..1 range
+            s_stickRX = (dx > 1.0f) ? 1.0f : (dx < -1.0f) ? -1.0f : dx;
+            s_stickRY = (dy > 1.0f) ? 1.0f : (dy < -1.0f) ? -1.0f : dy;
+            // Set digital stick buttons for look actions
+            if (s_stickRX > 0.1f)  s_buttons |= _360_JOY_BUTTON_RSTICK_RIGHT;
+            if (s_stickRX < -0.1f) s_buttons |= _360_JOY_BUTTON_RSTICK_LEFT;
+            if (s_stickRY > 0.1f)  s_buttons |= _360_JOY_BUTTON_RSTICK_DOWN;
+            if (s_stickRY < -0.1f) s_buttons |= _360_JOY_BUTTON_RSTICK_UP;
+        }
+        s_lastMouseX = mx;
+        s_lastMouseY = my;
+        s_firstMouse = false;
+    }
 
-void C_4JInput::SetJoypadStickAxisMap(int /*iPad*/, unsigned int /*uiFrom*/, unsigned int /*uiTo*/) {}
-void C_4JInput::SetJoypadStickTriggerMap(int /*iPad*/, unsigned int /*uiFrom*/, unsigned int /*uiTo*/) {}
+    // --- Mouse buttons → triggers ---
+    if (glfwGetMouseButton(g_window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
+        s_buttons |= _360_JOY_BUTTON_RT;
+        s_triggerR = 255;
+    }
+    if (glfwGetMouseButton(g_window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
+        s_buttons |= _360_JOY_BUTTON_LT;
+        s_triggerL = 255;
+    }
+    if (glfwGetMouseButton(g_window, GLFW_MOUSE_BUTTON_MIDDLE) == GLFW_PRESS)
+        s_buttons |= _360_JOY_BUTTON_LTHUMB;
 
-void C_4JInput::SetKeyRepeatRate(float /*fRepeatDelaySecs*/, float /*fRepeatRateSecs*/) {}
-void C_4JInput::SetDebugSequence(const char * /*chSequenceA*/, int(*/*Func*/)(LPVOID), LPVOID /*lpParam*/) {}
+    // --- Face buttons ---
+    if (glfwGetKey(g_window, GLFW_KEY_SPACE) == GLFW_PRESS)
+        s_buttons |= _360_JOY_BUTTON_A;
+    if (glfwGetKey(g_window, GLFW_KEY_Q) == GLFW_PRESS)
+        s_buttons |= _360_JOY_BUTTON_B;
+    if (glfwGetKey(g_window, GLFW_KEY_F) == GLFW_PRESS)
+        s_buttons |= _360_JOY_BUTTON_X;
+    if (glfwGetKey(g_window, GLFW_KEY_E) == GLFW_PRESS)
+        s_buttons |= _360_JOY_BUTTON_Y;
 
-FLOAT C_4JInput::GetIdleSeconds(int /*iPad*/) { return 0.0f; }
+    // --- Menu/system ---
+    if (glfwGetKey(g_window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+        s_buttons |= _360_JOY_BUTTON_START;
+    if (glfwGetKey(g_window, GLFW_KEY_TAB) == GLFW_PRESS)
+        s_buttons |= _360_JOY_BUTTON_BACK;
+    if (glfwGetKey(g_window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
+        s_buttons |= _360_JOY_BUTTON_RTHUMB;
+
+    // --- Scroll wheel → bumpers (hotbar scroll) ---
+    if (s_scrollAccum > 0.5f)  { s_buttons |= _360_JOY_BUTTON_RB; s_scrollAccum = 0; }
+    if (s_scrollAccum < -0.5f) { s_buttons |= _360_JOY_BUTTON_LB; s_scrollAccum = 0; }
+
+    // --- DPad (arrow keys) ---
+    if (glfwGetKey(g_window, GLFW_KEY_UP) == GLFW_PRESS)
+        s_buttons |= _360_JOY_BUTTON_DPAD_UP;
+    if (glfwGetKey(g_window, GLFW_KEY_DOWN) == GLFW_PRESS)
+        s_buttons |= _360_JOY_BUTTON_DPAD_DOWN;
+    if (glfwGetKey(g_window, GLFW_KEY_LEFT) == GLFW_PRESS)
+        s_buttons |= _360_JOY_BUTTON_DPAD_LEFT;
+    if (glfwGetKey(g_window, GLFW_KEY_RIGHT) == GLFW_PRESS)
+        s_buttons |= _360_JOY_BUTTON_DPAD_RIGHT;
+
+    // --- F5 → third person (LTHUMB) ---
+    if (glfwGetKey(g_window, GLFW_KEY_F5) == GLFW_PRESS)
+        s_buttons |= _360_JOY_BUTTON_LTHUMB;
+
+    // --- Mouse capture: left-click grabs, Escape releases ---
+    if (!s_mouseCaptured && !s_menuDisplayed &&
+        glfwGetMouseButton(g_window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS)
+    {
+        glfwSetInputMode(g_window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        if (glfwRawMouseMotionSupported())
+            glfwSetInputMode(g_window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
+        s_mouseCaptured = true;
+        s_firstMouse = true;
+    }
+    if (s_mouseCaptured && glfwGetKey(g_window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+    {
+        glfwSetInputMode(g_window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+        s_mouseCaptured = false;
+    }
+}
+
+void C_4JInput::SetDeadzoneAndMovementRange(unsigned int, unsigned int) {}
+
+void C_4JInput::SetGameJoypadMaps(unsigned char ucMap, unsigned char ucAction, unsigned int uiActionVal)
+{
+    if (ucMap < 3 && ucAction < 64)
+        s_joypadMaps[ucMap][ucAction] = uiActionVal;
+}
+
+unsigned int C_4JInput::GetGameJoypadMaps(unsigned char ucMap, unsigned char ucAction)
+{
+    if (ucMap < 3 && ucAction < 64)
+        return s_joypadMaps[ucMap][ucAction];
+    return 0;
+}
+
+void C_4JInput::SetJoypadMapVal(int iPad, unsigned char ucMap)
+{
+    if (iPad >= 0 && iPad < 4) s_padMapStyle[iPad] = ucMap;
+}
+
+unsigned char C_4JInput::GetJoypadMapVal(int iPad)
+{
+    return (iPad >= 0 && iPad < 4) ? s_padMapStyle[iPad] : 0;
+}
+
+void C_4JInput::SetJoypadSensitivity(int, float) {}
+
+unsigned int C_4JInput::GetValue(int iPad, unsigned char ucAction, bool)
+{
+    if (iPad != 0) return 0;
+    if (ucAction == 255) return s_buttons ? 1 : 0;
+    unsigned int mapping = s_joypadMaps[s_padMapStyle[0]][ucAction < 64 ? ucAction : 0];
+    return (s_buttons & mapping) ? 1 : 0;
+}
+
+bool C_4JInput::ButtonPressed(int iPad, unsigned char ucAction)
+{
+    if (iPad != 0) return false;
+    if (ucAction == 255) {
+        uint32_t newlyPressed = s_buttons & ~s_buttonsPrev;
+        return newlyPressed != 0;
+    }
+    unsigned int mapping = s_joypadMaps[s_padMapStyle[0]][ucAction < 64 ? ucAction : 0];
+    return (s_buttons & mapping) && !(s_buttonsPrev & mapping);
+}
+
+bool C_4JInput::ButtonReleased(int iPad, unsigned char ucAction)
+{
+    if (iPad != 0) return false;
+    if (ucAction == 255) {
+        uint32_t newlyReleased = s_buttonsPrev & ~s_buttons;
+        return newlyReleased != 0;
+    }
+    unsigned int mapping = s_joypadMaps[s_padMapStyle[0]][ucAction < 64 ? ucAction : 0];
+    return !(s_buttons & mapping) && (s_buttonsPrev & mapping);
+}
+
+bool C_4JInput::ButtonDown(int iPad, unsigned char ucAction)
+{
+    if (iPad != 0) return false;
+    if (ucAction == 255) return s_buttons != 0;
+    unsigned int mapping = s_joypadMaps[s_padMapStyle[0]][ucAction < 64 ? ucAction : 0];
+    return (s_buttons & mapping) != 0;
+}
+
+void C_4JInput::SetJoypadStickAxisMap(int, unsigned int, unsigned int) {}
+void C_4JInput::SetJoypadStickTriggerMap(int, unsigned int, unsigned int) {}
+
+void C_4JInput::SetKeyRepeatRate(float, float) {}
+void C_4JInput::SetDebugSequence(const char *, int(*)(LPVOID), LPVOID) {}
+
+FLOAT C_4JInput::GetIdleSeconds(int) { return 0.0f; }
 
 bool C_4JInput::IsPadConnected(int iPad)
 {
-    // Pad 0 is always "connected" so the game has a primary controller
     return (iPad == 0);
 }
 
-float         C_4JInput::GetJoypadStick_LX(int /*iPad*/, bool /*bCheckMenuDisplay*/) { return 0.0f; }
-float         C_4JInput::GetJoypadStick_LY(int /*iPad*/, bool /*bCheckMenuDisplay*/) { return 0.0f; }
-float         C_4JInput::GetJoypadStick_RX(int /*iPad*/, bool /*bCheckMenuDisplay*/) { return 0.0f; }
-float         C_4JInput::GetJoypadStick_RY(int /*iPad*/, bool /*bCheckMenuDisplay*/) { return 0.0f; }
-unsigned char C_4JInput::GetJoypadLTrigger(int /*iPad*/, bool /*bCheckMenuDisplay*/) { return 0; }
-unsigned char C_4JInput::GetJoypadRTrigger(int /*iPad*/, bool /*bCheckMenuDisplay*/) { return 0; }
+float C_4JInput::GetJoypadStick_LX(int iPad, bool) { return (iPad == 0) ? s_stickLX : 0.0f; }
+float C_4JInput::GetJoypadStick_LY(int iPad, bool) { return (iPad == 0) ? s_stickLY : 0.0f; }
+float C_4JInput::GetJoypadStick_RX(int iPad, bool) { return (iPad == 0) ? s_stickRX : 0.0f; }
+float C_4JInput::GetJoypadStick_RY(int iPad, bool) { return (iPad == 0) ? s_stickRY : 0.0f; }
+unsigned char C_4JInput::GetJoypadLTrigger(int iPad, bool) { return (iPad == 0) ? s_triggerL : (uint8_t)0; }
+unsigned char C_4JInput::GetJoypadRTrigger(int iPad, bool) { return (iPad == 0) ? s_triggerR : (uint8_t)0; }
 
-void C_4JInput::SetMenuDisplayed(int /*iPad*/, bool /*bVal*/) {}
+void C_4JInput::SetMenuDisplayed(int, bool bVal) { s_menuDisplayed = bVal; }
 
 EKeyboardResult C_4JInput::RequestKeyboard(LPCWSTR /*Title*/, LPCWSTR /*Text*/, DWORD /*dwPad*/, UINT /*uiMaxChars*/,
                                            int(*/*Func*/)(LPVOID, const bool), LPVOID /*lpParam*/, C_4JInput::EKeyboardMode /*eMode*/)

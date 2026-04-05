@@ -7,15 +7,37 @@
 #include <unordered_map>
 #include <cstring>
 #include <algorithm>
+#include <vector>
 
 static std::unordered_map<int, VkTextureInfo> s_textures;
 static int s_nextId = 1;
 
+// Dedicated command pool for texture uploads — separate from render thread's pool
+// so one-shot uploads from the update thread don't race with per-frame recording.
+static VkCommandPool s_uploadPool = VK_NULL_HANDLE;
+
+// ─── Pending sub-upload batching ──────────────────────────────────────────
+// Instead of submitting a separate command buffer + vkQueueWaitIdle for every
+// sub-upload, we collect them and flush once per frame.  This turns N full
+// GPU syncs into 1.
+
+struct PendingSubUpload {
+    int           texId;
+    int           xoff, yoff;
+    int           width, height;
+    int           mipLevel;
+    VkBuffer      staging;
+    VmaAllocation stagingAlloc;
+};
+
+static std::vector<PendingSubUpload> s_pendingUploads;
+
 // ─── Helper: one-shot command buffer for image transitions/copies ──────────
 static VkCommandBuffer beginOneShot()
 {
+    VkCommandPool pool = s_uploadPool ? s_uploadPool : g_vk.commandPool;
     VkCommandBufferAllocateInfo ai = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
-    ai.commandPool        = g_vk.commandPool;
+    ai.commandPool        = pool;
     ai.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     ai.commandBufferCount = 1;
     VkCommandBuffer cmd;
@@ -28,26 +50,31 @@ static VkCommandBuffer beginOneShot()
 
 static void endOneShot(VkCommandBuffer cmd)
 {
+    VkCommandPool pool = s_uploadPool ? s_uploadPool : g_vk.commandPool;
     vkEndCommandBuffer(cmd);
     VkSubmitInfo si = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
     si.commandBufferCount = 1;
     si.pCommandBuffers    = &cmd;
-    vkQueueSubmit(g_vk.graphicsQueue, 1, &si, VK_NULL_HANDLE);
-    vkQueueWaitIdle(g_vk.graphicsQueue);
-    vkFreeCommandBuffers(g_vk.device, g_vk.commandPool, 1, &cmd);
+    {
+        std::lock_guard<std::mutex> lock(g_vkQueueMutex);
+        vkQueueSubmit(g_vk.graphicsQueue, 1, &si, VK_NULL_HANDLE);
+        vkQueueWaitIdle(g_vk.graphicsQueue);
+    }
+    vkFreeCommandBuffers(g_vk.device, pool, 1, &cmd);
 }
 
 // ─── Helper: transition image layout ───────────────────────────────────────
 static void transitionImage(VkCommandBuffer cmd, VkImage image,
     VkImageLayout oldLayout, VkImageLayout newLayout,
     VkAccessFlags srcAccess, VkAccessFlags dstAccess,
-    VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage)
+    VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage,
+    uint32_t baseMip = 0, uint32_t mipCount = VK_REMAINING_MIP_LEVELS)
 {
     VkImageMemoryBarrier barrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
     barrier.oldLayout        = oldLayout;
     barrier.newLayout        = newLayout;
     barrier.image            = image;
-    barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, 1 };
+    barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, baseMip, mipCount, 0, 1 };
     barrier.srcAccessMask    = srcAccess;
     barrier.dstAccessMask    = dstAccess;
     vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
@@ -110,6 +137,7 @@ void vkt_free(int id)
 }
 
 // ─── vkt_upload ────────────────────────────────────────────────────────────
+// Full image upload — used during loading.  Executes immediately (one-shot).
 void vkt_upload(int id, int width, int height, const void* data, int mipLevel)
 {
     auto it = s_textures.find(id);
@@ -133,7 +161,7 @@ void vkt_upload(int id, int width, int height, const void* data, int mipLevel)
         {
             VkImageCreateInfo ici = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
             ici.imageType     = VK_IMAGE_TYPE_2D;
-            ici.format        = VK_FORMAT_R8G8B8A8_UNORM; // game provides RGBA byte order
+            ici.format        = VK_FORMAT_R8G8B8A8_UNORM; // game unpacks to RGBA bytes (R,G,B,A at offsets 0,1,2,3)
             ici.extent        = { (uint32_t)width, (uint32_t)height, 1 };
             // Calculate max mip levels from dimensions
             uint32_t maxDim = std::max((uint32_t)width, (uint32_t)height);
@@ -182,23 +210,47 @@ void vkt_upload(int id, int width, int height, const void* data, int mipLevel)
     memcpy(mapped, data, imageSize);
     vmaUnmapMemory(g_vk.allocator, stagingAlloc);
 
-    // Transfer
+    // Transfer — for mip 0 on a fresh image, transition all mips from UNDEFINED.
+    // For mip > 0, the image is already in SHADER_READ_ONLY from the base upload,
+    // so only transition the specific mip level to avoid discarding other mips' data.
     VkCommandBuffer cmd = beginOneShot();
 
-    transitionImage(cmd, tex.image,
-        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        0, VK_ACCESS_TRANSFER_WRITE_BIT,
-        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+    if (mipLevel == 0)
+    {
+        transitionImage(cmd, tex.image,
+            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            0, VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+    }
+    else
+    {
+        transitionImage(cmd, tex.image,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            (uint32_t)mipLevel, 1);
+    }
 
     VkBufferImageCopy region = {};
     region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, (uint32_t)mipLevel, 0, 1 };
     region.imageExtent = { (uint32_t)width, (uint32_t)height, 1 };
     vkCmdCopyBufferToImage(cmd, staging, tex.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
-    transitionImage(cmd, tex.image,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+    if (mipLevel == 0)
+    {
+        transitionImage(cmd, tex.image,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+    }
+    else
+    {
+        transitionImage(cmd, tex.image,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            (uint32_t)mipLevel, 1);
+    }
 
     endOneShot(cmd);
     vmaDestroyBuffer(g_vk.allocator, staging, stagingAlloc);
@@ -208,11 +260,13 @@ void vkt_upload(int id, int width, int height, const void* data, int mipLevel)
 }
 
 // ─── vkt_sub_upload ────────────────────────────────────────────────────────
+// Sub-region update — queued into a batch and flushed once per frame by
+// vkt_flush_uploads().  This avoids N separate vkQueueWaitIdle calls for
+// animated texture ticks (water, lava, fire, portal).
 void vkt_sub_upload(int id, int xoff, int yoff, int width, int height, const void* data, int mipLevel)
 {
     auto it = s_textures.find(id);
     if (it == s_textures.end() || !data || !it->second.image) return;
-    VkTextureInfo& tex = it->second;
 
     VkDeviceSize imageSize = (VkDeviceSize)width * height * 4;
     VkBuffer staging;
@@ -229,26 +283,50 @@ void vkt_sub_upload(int id, int xoff, int yoff, int width, int height, const voi
     memcpy(mapped, data, imageSize);
     vmaUnmapMemory(g_vk.allocator, stagingAlloc);
 
+    s_pendingUploads.push_back({ id, xoff, yoff, width, height, mipLevel, staging, stagingAlloc });
+}
+
+// ─── vkt_flush_uploads ────────────────────────────────────────────────────
+// Processes all pending sub-uploads in a single command buffer + one GPU sync.
+void vkt_flush_uploads()
+{
+    if (s_pendingUploads.empty()) return;
+
     VkCommandBuffer cmd = beginOneShot();
 
-    transitionImage(cmd, tex.image,
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
-        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+    for (auto& up : s_pendingUploads)
+    {
+        auto it = s_textures.find(up.texId);
+        if (it == s_textures.end() || !it->second.image) continue;
+        VkTextureInfo& tex = it->second;
 
-    VkBufferImageCopy region = {};
-    region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, (uint32_t)mipLevel, 0, 1 };
-    region.imageOffset = { xoff, yoff, 0 };
-    region.imageExtent = { (uint32_t)width, (uint32_t)height, 1 };
-    vkCmdCopyBufferToImage(cmd, staging, tex.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+        // Transition the specific mip level from SHADER_READ_ONLY to TRANSFER_DST
+        transitionImage(cmd, tex.image,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            (uint32_t)up.mipLevel, 1);
 
-    transitionImage(cmd, tex.image,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+        VkBufferImageCopy region = {};
+        region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, (uint32_t)up.mipLevel, 0, 1 };
+        region.imageOffset = { up.xoff, up.yoff, 0 };
+        region.imageExtent = { (uint32_t)up.width, (uint32_t)up.height, 1 };
+        vkCmdCopyBufferToImage(cmd, up.staging, tex.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+        // Transition back to SHADER_READ_ONLY
+        transitionImage(cmd, tex.image,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            (uint32_t)up.mipLevel, 1);
+    }
 
     endOneShot(cmd);
-    vmaDestroyBuffer(g_vk.allocator, staging, stagingAlloc);
+
+    // Free all staging buffers after the GPU is done
+    for (auto& up : s_pendingUploads)
+        vmaDestroyBuffer(g_vk.allocator, up.staging, up.stagingAlloc);
+    s_pendingUploads.clear();
 }
 
 // ─── vkt_set_filter ────────────────────────────────────────────────────────
@@ -273,11 +351,22 @@ VkDescriptorSet vkt_get_descriptor(int id)
 }
 
 // ─── vkt_init / vkt_cleanup ────────────────────────────────────────────────
-void vkt_init() {}
+void vkt_init()
+{
+    VkCommandPoolCreateInfo pi = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
+    pi.flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    pi.queueFamilyIndex = g_vk.graphicsFamily;
+    vkCreateCommandPool(g_vk.device, &pi, nullptr, &s_uploadPool);
+}
 
 void vkt_cleanup()
 {
     vkDeviceWaitIdle(g_vk.device);
+    // Free any pending uploads
+    for (auto& up : s_pendingUploads)
+        vmaDestroyBuffer(g_vk.allocator, up.staging, up.stagingAlloc);
+    s_pendingUploads.clear();
+
     for (auto& [id, tex] : s_textures)
     {
         if (tex.descSet && tex.descSet != g_pipe.whiteTexDescSet)
@@ -286,4 +375,8 @@ void vkt_cleanup()
         if (tex.image) vmaDestroyImage(g_vk.allocator, tex.image, tex.alloc);
     }
     s_textures.clear();
+    if (s_uploadPool) {
+        vkDestroyCommandPool(g_vk.device, s_uploadPool, nullptr);
+        s_uploadPool = VK_NULL_HANDLE;
+    }
 }
