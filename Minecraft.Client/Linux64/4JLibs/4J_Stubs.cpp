@@ -459,15 +459,22 @@ static void executeDraw(const DrawCall &call)
     VkPushConstants pc = {};
     memcpy(pc.mvp, mvp, 64);
     pc.globalColor[0] = pc.globalColor[1] = pc.globalColor[2] = pc.globalColor[3] = 1.0f;
-    // Resolve texture
+    // Resolve texture.  textureId semantics:
+    //   -1 = unset (needs resolution from current GL state)
+    //    0 = explicitly disabled (glDisable(GL_TEXTURE_2D))
+    //   >0 = specific texture to use
     int effectiveTextureId = call.textureId;
-    if (effectiveTextureId <= 0)
+    if (effectiveTextureId < 0)
     {
         if (g_currentTexture > 0) effectiveTextureId = g_currentTexture;
         else if (tl_currentTexture > 0) effectiveTextureId = tl_currentTexture;
         else effectiveTextureId = g_sharedTextureId.load(std::memory_order_relaxed);
     }
-    memcpy(pc.globalColor, g_renderState.globalColor, sizeof(pc.globalColor));
+    // Only apply glColor state when the draw uses global color (no per-vertex colors).
+    // Per-vertex color draws already have color baked into vertices — multiplying by
+    // globalColor would double-tint them with whatever glColor4f was last set.
+    if (!call.useVertexColor)
+        memcpy(pc.globalColor, g_renderState.globalColor, sizeof(pc.globalColor));
     // Enable texturing whenever we have a valid texture — the g_textureEnabled flag
     // is unreliable across display list replay boundaries.
     pc.textureEnable   = (effectiveTextureId > 0) ? 1.0f : 0.0f;
@@ -680,13 +687,10 @@ void C4JRender::Present()
     if (!ensureGLReady())
         return;
     g_frameCount++;
-    if (g_frameCount % 30 == 1)
-        SessionLog_Printf("[vk-diag] frame %d: %d draws (%d in/%d out frustum) cbuf=%d staging=%llu clear=%.3f,%.3f,%.3f fog=%.3f,%.3f,%.3f fogE=%d\n",
+    if (g_frameCount % 300 == 1)
+        SessionLog_Printf("[vk-diag] frame %d: %d draws (%d in/%d out frustum) cbuf=%d staging=%llu\n",
             g_frameCount, g_drawCallCount, g_drawsInFrustum, g_drawsOutFrustum,
-            g_cbuffCallCount, (unsigned long long)g_vk.stagingOffset,
-            g_vk.clearColor[0], g_vk.clearColor[1], g_vk.clearColor[2],
-            g_renderState.fogColor[0], g_renderState.fogColor[1], g_renderState.fogColor[2],
-            g_renderState.fogEnable ? 1 : 0);
+            g_cbuffCallCount, (unsigned long long)g_vk.stagingOffset);
     g_drawsInFrustum = 0;
     g_drawsOutFrustum = 0;
     if (g_vk.inRenderPass)
@@ -854,6 +858,9 @@ void C4JRender::DrawVertices(ePrimitiveType PrimitiveType, int count, void *data
 
     // Immediate draw
     call.hasMatrices = false;
+    // If GL_TEXTURE_2D is disabled, force texture off (0 = explicitly disabled).
+    if (!g_textureEnabled)
+        call.textureId = 0;
 
     if (!ensureGLReady())
         return;
@@ -948,7 +955,9 @@ bool C4JRender::CBuffCall(int index, bool /*full*/)
         else
         {
             // Untextured replay (sky, lines): force texture off.
-            c.textureId = -1;
+            // Use 0 (not -1) so executeDraw doesn't fall through to the
+            // texture resolution chain that would re-assign a texture.
+            c.textureId = 0;
         }
         executeDraw(c);
     }
