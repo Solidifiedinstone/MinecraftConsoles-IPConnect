@@ -29,6 +29,10 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 #include "gl_api.h"
+#include "vk_backend.h"
+#include "vk_pipeline.h"
+#include "vk_texture.h"
+#include "../SessionLog.h"
 
 /* ====================================================================
  * Global singleton instances
@@ -58,6 +62,7 @@ struct DrawCall
     C4JRender::eVertexType vtype;
     std::vector<unsigned char> bytes;
     bool hasMatrices = false;
+    bool useVertexColor = true; // false = use current GL color state, not per-vertex
     float modelview[16];
     float projection[16];
     int textureId = -1;
@@ -75,6 +80,7 @@ std::thread::id g_renderThread;
 float g_clearRGBA[4] = {0.0f, 0.0f, 0.0f, 1.0f};
 int g_textureLevels = 1;
 int g_currentTexture = -1;
+bool g_textureEnabled = true; // tracks glEnable/glDisable(GL_TEXTURE_2D) state
 int g_nextTextureId = 1;
 int g_nextCBuffId = 1;
 std::unordered_map<int, TextureInfo> g_textures;
@@ -83,6 +89,34 @@ std::mutex g_cbuffMutex;
 thread_local int tl_recordingCbuff = -1;
 thread_local std::vector<DrawCall> tl_recordingCalls;
 thread_local int tl_currentTexture = -1;
+thread_local bool tl_nextDrawHasVertexColor = true; // set by Tesselator before DrawVertices
+thread_local float tl_savedModelForRecording[16]; // saved MV at CBuffStart for restore at CBuffEnd
+
+// Scroll callback for input (must be defined before ensureGLReady)
+static float s_scrollAccum = 0;
+static void inputScrollCallback(GLFWwindow*, double /*xoff*/, double yoff)
+{
+    s_scrollAccum += (float)yoff;
+}
+
+// ── Render state for Vulkan pipeline selection + push constants ──
+struct RenderState {
+    bool   blendEnable = false;
+    int    blendSrc = 6; // VK_BLEND_FACTOR_SRC_ALPHA
+    int    blendDst = 7; // VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
+    bool   depthTestEnable = true;
+    bool   depthWriteEnable = true;
+    bool   alphaTestEnable = false;
+    float  alphaRef = 0.1f;
+    bool   fogEnable = false;
+    int    fogMode = 0; // 0=linear, 1=exp
+    float  fogNear = 0.0f, fogFar = 256.0f, fogDensity = 1.0f;
+    float  fogColor[3] = {0,0,0};
+    float  globalColor[4] = {1,1,1,1};
+    uint8_t colorWriteMask = 0xF; // RGBA
+    float  depthBiasSlope = 0.0f, depthBiasConst = 0.0f;
+};
+static RenderState g_renderState;
 thread_local float tl_globalUV[2] = {0.0f, 0.0f};
 std::atomic<int> g_sharedTextureId(-1);
 std::atomic<float> g_sharedUVU(0.0f);
@@ -136,6 +170,15 @@ static void decode565(unsigned short packed, unsigned char &r, unsigned char &g,
     g = (unsigned char)((((packed >> 5) & 0x3F) * 255 + 31) / 63);
     b = (unsigned char)(((packed & 0x1F) * 255 + 15) / 31);
 }
+
+// Overworld brightness ramp: ramp[i] = (i/15) / (3*(1-i/15) + 1), ambientLight=0
+// Maps light level 0-15 to brightness 0.0-1.0
+static const float s_brightnessRamp[16] = {
+    0.0f,      0.01754f, 0.03704f, 0.05882f,
+    0.08333f,  0.11111f, 0.14286f, 0.17949f,
+    0.22222f,  0.27273f, 0.33333f, 0.40741f,
+    0.50000f,  0.61905f, 0.77778f, 1.00000f
+};
 
 static void matIdentity(float m[16])
 {
@@ -210,6 +253,7 @@ static void softTranslate(float x, float y, float z)
     t[13] = y;
     t[14] = z;
     matPostMul(currentSoftMatrix(), t);
+    // (debug translate logging removed)
 }
 
 static void softScale(float x, float y, float z)
@@ -254,14 +298,15 @@ static void softOrtho(float left, float right, float bottom, float top, float zN
     if (std::fabs(rl) <= 1e-8f || std::fabs(tb) <= 1e-8f || std::fabs(fn) <= 1e-8f)
         return;
 
+    // Right-handed (-Z forward) → Vulkan NDC: depth [0,1], Y-flipped
     float o[16];
     matIdentity(o);
-    o[0] = 2.0f / rl;
-    o[5] = 2.0f / tb;
-    o[10] = -2.0f / fn;
+    o[0]  =  2.0f / rl;
+    o[5]  = -2.0f / tb;              // Y-flip for Vulkan
+    o[10] = -1.0f / fn;              // RH: -Z forward, depth [0,1]
     o[12] = -(right + left) / rl;
-    o[13] = -(top + bottom) / tb;
-    o[14] = -(zFar + zNear) / fn;
+    o[13] =  (top + bottom) / tb;    // Y-flip for Vulkan
+    o[14] = -zNear / fn;             // depth [0,1]
     matPostMul(currentSoftMatrix(), o);
 }
 
@@ -273,21 +318,24 @@ static void softFrustum(float left, float right, float bottom, float top, float 
     if (std::fabs(rl) <= 1e-8f || std::fabs(tb) <= 1e-8f || std::fabs(fn) <= 1e-8f || zNear <= 0.0f || zFar <= 0.0f)
         return;
 
+    // Right-handed (-Z forward) → Vulkan NDC: depth [0,1], Y-flipped
+    // The game's modelview produces negative z_view for objects in front
+    // of the camera (standard OpenGL RH convention: glRotatef(yaw+180,...)).
     float f[16];
     memset(f, 0, sizeof(f));
-    f[0] = (2.0f * zNear) / rl;
-    f[5] = (2.0f * zNear) / tb;
-    f[8] = (right + left) / rl;
-    f[9] = (top + bottom) / tb;
-    f[10] = -(zFar + zNear) / fn;
-    f[11] = -1.0f;
-    f[14] = -(2.0f * zFar * zNear) / fn;
+    f[0]  =  (2.0f * zNear) / rl;
+    f[5]  = -(2.0f * zNear) / tb;    // Y-flip for Vulkan
+    f[8]  =  (right + left) / rl;
+    f[9]  = -(top + bottom) / tb;     // Y-flip for Vulkan
+    f[10] = -zFar / fn;               // RH: -Z forward, depth [0,1]
+    f[11] = -1.0f;                     // RH: clip_w = -z_view
+    f[14] = -(zFar * zNear) / fn;     // depth [0,1]
     matPostMul(currentSoftMatrix(), f);
 }
 
 static void onGlfwError(int code, const char *desc)
 {
-    std::fprintf(stderr, "[linuxgl] GLFW error %d: %s\n", code, desc ? desc : "(null)");
+    SessionLog_Printf("[linuxgl] GLFW error %d: %s\n", code, desc ? desc : "(null)");
 }
 
 static std::mutex g_initMutex;
@@ -306,15 +354,17 @@ static bool ensureGLReady()
         glfwSetErrorCallback(onGlfwError);
         if (!glfwInit())
         {
-            std::fprintf(stderr, "[linuxgl] glfwInit failed\n");
+            SessionLog_Printf("[vk] glfwInit failed\n");
             return false;
         }
         glfwInitDone = true;
     }
 
+    // Create window with NO API — Vulkan provides rendering.
     glfwDefaultWindowHints();
     glfwWindowHint(GLFW_VISIBLE, GLFW_TRUE);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     int w = (g_iScreenWidth > 0) ? g_iScreenWidth : 1280;
     int h = (g_iScreenHeight > 0) ? g_iScreenHeight : 720;
     if (w < 640) w = 640;
@@ -327,22 +377,25 @@ static bool ensureGLReady()
         g_window = glfwCreateWindow(800, 600, "Minecraft Console Edition", nullptr, nullptr);
     if (!g_window)
     {
-        std::fprintf(stderr, "[linuxgl] failed to create GLFW window\n");
+        SessionLog_Printf("[vk] failed to create GLFW window\n");
         return false;
     }
 
-    glfwMakeContextCurrent(g_window);
     glfwShowWindow(g_window);
-    glfwSwapInterval(1);
     glfwGetFramebufferSize(g_window, &g_iScreenWidth, &g_iScreenHeight);
     if (g_iScreenWidth < 1) g_iScreenWidth = 1;
     if (g_iScreenHeight < 1) g_iScreenHeight = 1;
     g_iAspectRatio = (float)g_iScreenWidth / (float)g_iScreenHeight;
-    mcglViewport(0, 0, g_iScreenWidth, g_iScreenHeight);
-    mcglEnable(0x0DE1); // GL_TEXTURE_2D
-    mcglEnable(0x0B71); // GL_DEPTH_TEST
-    mcglDepthFunc(0x0203); // GL_LEQUAL
-    mcglClearColor(g_clearRGBA[0], g_clearRGBA[1], g_clearRGBA[2], g_clearRGBA[3]);
+
+    // Initialize Vulkan backend
+    if (!vkb_init(g_window))
+    {
+        SessionLog_Printf("[vk] Vulkan init failed\n");
+        return false;
+    }
+
+    // Set up input callbacks now that window exists
+    glfwSetScrollCallback(g_window, inputScrollCallback);
 
     g_renderThread = std::this_thread::get_id();
     g_glReady.store(true, std::memory_order_release);
@@ -368,156 +421,317 @@ static void updateWindowSize()
     }
 }
 
+// Helper: multiply two column-major 4x4 matrices: out = a * b
+static void mat4Mul(float *out, const float *a, const float *b)
+{
+    for (int c = 0; c < 4; c++)
+        for (int r = 0; r < 4; r++)
+            out[c*4+r] = a[0*4+r]*b[c*4+0] + a[1*4+r]*b[c*4+1] + a[2*4+r]*b[c*4+2] + a[3*4+r]*b[c*4+3];
+}
+
+// Standard vertex layout for Vulkan (matches shader inputs at 32-byte stride)
+struct VkStdVertex { float x, y, z, u, v; uint32_t color; uint32_t _pad0, _pad1; };
+
+static int g_drawCallCount = 0;
+static int g_cbuffCallCount = 0;
+static int g_frameCount = 0;
+static int g_drawsInFrustum = 0;
+static int g_drawsOutFrustum = 0;
+static int g_drawsWithFog = 0;
+static int g_subUploadCount = 0; // texture sub-uploads this frame
+static int g_fullUploadCount = 0; // full texture uploads this frame (blocking)
+
+static int g_compressedDraws = 0, g_standardDraws = 0;
+static int g_texturedDraws = 0, g_untexturedDraws = 0;
+
+// Wall-clock diagnostic timer (logs every 2 seconds instead of every N frames)
+static double g_diagLastTime = 0.0;
+static int g_diagFrameAccum = 0;
+
+// Per-frame timing (milliseconds)
+static double g_timeFlush = 0, g_timeBeginFrame = 0, g_timeDraw = 0, g_timeEndFrame = 0;
+static double g_startFrameEndTime = 0; // timestamp when StartFrame finished
+static int g_pipelineCreates = 0; // pipeline cache misses this frame
+
 static void executeDraw(const DrawCall &call)
 {
     if (call.count <= 0 || call.bytes.empty())
         return;
+    if (!g_vk.inRenderPass || !g_vk.device)
+        return;
+    if (call.vtype == C4JRender::VERTEX_TYPE_COMPRESSED) g_compressedDraws++;
+    else g_standardDraws++;
 
-    // Conservative fixed-function baseline for replayed world draws.
-    // Legacy state leakage here can cause missing faces / incorrect block colors.
-    mcglDisable(0x0B44); // GL_CULL_FACE
-    mcglFrontFace(0x0901); // GL_CCW
-    mcglDisable(0x0B50); // GL_LIGHTING
-    mcglDisable(0x4000); // GL_LIGHT0
-    mcglDisable(0x4001); // GL_LIGHT1
-    mcglColor4ub(255, 255, 255, 255);
+    VkCommandBuffer cmd = vkb_cmd();
+    if (!cmd || !g_vk.stagingMapped[g_vk.currentFrame])
+        return;
 
-    int effectiveTextureId = call.textureId;
-    if (effectiveTextureId <= 0)
+    // ── Compute MVP ──
+    ensureSoftMatrices();
+
+    float mvp[16];
+    float mv[16];
+    if (call.hasMatrices)
     {
-        if (g_currentTexture > 0)
-            effectiveTextureId = g_currentTexture;
-        else if (tl_currentTexture > 0)
-            effectiveTextureId = tl_currentTexture;
-        else
-            effectiveTextureId = g_sharedTextureId.load(std::memory_order_relaxed);
-    }
-
-    if (effectiveTextureId > 0)
-    {
-        auto it = g_textures.find(effectiveTextureId);
-        if (it != g_textures.end())
-        {
-            mcglEnable(0x0DE1); // GL_TEXTURE_2D
-            mcglBindTexture(0x0DE1, it->second.glId);
-        }
-        else
-        {
-            mcglDisable(0x0DE1); // GL_TEXTURE_2D
-            mcglBindTexture(0x0DE1, 0);
-        }
+        // CBuffCall replay: vertices are in chunk-local coordinates.
+        // The recorded modelview (call.modelview) contains the chunk-to-world
+        // translation captured during display list compilation (translateToPos).
+        // The current modelview has camera rotation + player translation.
+        // Combined: MV = currentMV * recordedMV  →  transforms local→world→view.
+        float combined[16];
+        matMul(combined, tl_softMatrices.model, call.modelview);
+        memcpy(mv, combined, sizeof(mv));
     }
     else
     {
-        mcglDisable(0x0DE1); // GL_TEXTURE_2D
-        mcglBindTexture(0x0DE1, 0);
+        // Immediate draw: current thread's modelview is correct.
+        memcpy(mv, tl_softMatrices.model, sizeof(mv));
     }
+    mat4Mul(mvp, tl_softMatrices.proj, mv);
 
-    if (call.hasMatrices)
+    // (per-draw matrix diagnostics removed — frame-level stats in frustum check below)
+
+    // ── Push constants ──
+    VkPushConstants pc = {};
+    memcpy(pc.mvp, mvp, 64);
+    pc.globalColor[0] = pc.globalColor[1] = pc.globalColor[2] = pc.globalColor[3] = 1.0f;
+    // Resolve texture.  textureId semantics:
+    //   -1 = unset (needs resolution from current GL state)
+    //    0 = explicitly disabled (glDisable(GL_TEXTURE_2D))
+    //   >0 = specific texture to use
+    int effectiveTextureId = call.textureId;
+    if (effectiveTextureId < 0)
     {
-        mcglMatrixMode(0x1700); // GL_MODELVIEW
-        mcglPushMatrix();
-        // Display-list style replay should preserve the caller's live camera/projection state.
-        // Apply recorded list-local transform on top of current modelview instead of replacing it.
-        mcglMultMatrixf(call.modelview);
+        if (g_currentTexture > 0) effectiveTextureId = g_currentTexture;
+        else if (tl_currentTexture > 0) effectiveTextureId = tl_currentTexture;
+        else effectiveTextureId = g_sharedTextureId.load(std::memory_order_relaxed);
     }
+    // Only apply glColor state when the draw uses global color (no per-vertex colors).
+    // Per-vertex color draws already have color baked into vertices — multiplying by
+    // globalColor would double-tint them with whatever glColor4f was last set.
+    if (!call.useVertexColor)
+        memcpy(pc.globalColor, g_renderState.globalColor, sizeof(pc.globalColor));
+    // Enable texturing whenever we have a valid texture — the g_textureEnabled flag
+    // is unreliable across display list replay boundaries.
+    pc.textureEnable   = (effectiveTextureId > 0) ? 1.0f : 0.0f;
+    pc.fogEnable       = g_renderState.fogEnable ? 1.0f : 0.0f;
+    if (g_renderState.fogEnable) g_drawsWithFog++;
+    pc.fogColor[0] = g_renderState.fogColor[0];
+    pc.fogColor[1] = g_renderState.fogColor[1];
+    pc.fogColor[2] = g_renderState.fogColor[2];
+    pc.fogColor[3]     = 1.0f;
+    pc.fogParams[0]    = g_renderState.fogNear;
+    pc.fogParams[1]    = g_renderState.fogFar;
+    pc.fogParams[2]    = g_renderState.fogDensity;
+    pc.fogParams[3]    = (float)g_renderState.fogMode;
+    pc.alphaTestEnable = g_renderState.alphaTestEnable ? 1.0f : 0.0f;
+    pc.alphaRef        = g_renderState.alphaRef;
 
-    // Avoid leaked texture-matrix state flattening/distorting UVs during replay.
-    mcglMatrixMode(0x1702); // GL_TEXTURE
-    mcglPushMatrix();
-    mcglLoadIdentity();
-    mcglMatrixMode(0x1700); // GL_MODELVIEW
-
+    // ── Expand vertices ──
     const bool isQuadList = (call.primitive == C4JRender::PRIMITIVE_TYPE_QUAD_LIST);
-    mcglBegin(isQuadList ? 0x0004 : mapPrimitive(call.primitive)); // GL_TRIANGLES for quads
-    if (call.vtype == C4JRender::VERTEX_TYPE_COMPRESSED)
+    const bool isCompressed = (call.vtype == C4JRender::VERTEX_TYPE_COMPRESSED);
+
+    // Calculate output vertex count
+    int outCount = call.count;
+    if (isQuadList)
+        outCount = (call.count / 4) * 6; // 4 verts per quad → 6 verts (2 triangles)
+
+    size_t outBytes = (size_t)outCount * 32;
+
+    // Check staging buffer space
+    VkDeviceSize alignedOffset = (g_vk.stagingOffset + 3) & ~(VkDeviceSize)3;
+    if (alignedOffset + outBytes > VKB_STAGING_BUFFER_SIZE)
+        return; // staging full, skip this draw
+
+    uint8_t *dst = (uint8_t*)g_vk.stagingMapped[g_vk.currentFrame] + alignedOffset;
+
+    // Write vertices to staging buffer
+    auto writeStdVert = [](uint8_t *d, float x, float y, float z, float u, float v, uint32_t col) {
+        float *f = (float*)d;
+        f[0] = x; f[1] = y; f[2] = z; f[3] = u; f[4] = v;
+        ((uint32_t*)d)[5] = col;
+        ((uint32_t*)d)[6] = 0;
+        ((uint32_t*)d)[7] = 0;
+    };
+
+    if (isCompressed)
     {
         const int16_t *v = reinterpret_cast<const int16_t *>(call.bytes.data());
-        auto emitCompVertex = [&](int i)
-        {
+        auto decodeVert = [&](int i, float &ox, float &oy, float &oz, float &ou, float &ov, uint32_t &oc) {
             const int16_t *s = v + (i * 8);
-            const float x = (float)s[0] / 1024.0f;
-            const float y = (float)s[1] / 1024.0f;
-            const float z = (float)s[2] / 1024.0f;
-            const float u = (float)s[4] / 8192.0f;
-            const float t = (float)s[5] / 8192.0f;
-            const unsigned short packed = (unsigned short)(((int)s[3] + 32768) & 0xFFFF);
-
-            unsigned char r = 255, g = 255, b = 255;
+            ox = (float)s[0] / 1024.0f;
+            oy = (float)s[1] / 1024.0f;
+            oz = (float)s[2] / 1024.0f;
+            ou = (float)s[4] / 8192.0f;
+            ov = (float)s[5] / 8192.0f;
+            unsigned short packed = (unsigned short)(((int)s[3] + 32768) & 0xFFFF);
+            unsigned char r, g, b;
             decode565(packed, r, g, b);
-            mcglColor4ub(r, g, b, 255);
-            mcglTexCoord2f(u, t);
-            mcglVertex3f(x, y, z);
+
+            // Lightmap brightness from s[6]=blockLight*16, s[7]=skyLight*16
+            int blockLight = (s[6] >> 4) & 0xF;
+            int skyLight   = (s[7] >> 4) & 0xF;
+            float skyBr   = s_brightnessRamp[skyLight];
+            float blockBr = s_brightnessRamp[blockLight] * 1.5f;
+            float bright  = skyBr + blockBr;
+            if (bright > 1.0f) bright = 1.0f;
+            bright = bright * 0.96f + 0.03f; // match lightmap post-processing
+
+            r = (unsigned char)(r * bright);
+            g = (unsigned char)(g * bright);
+            b = (unsigned char)(b * bright);
+
+            oc = ((uint32_t)r << 24) | ((uint32_t)g << 16) | ((uint32_t)b << 8) | 0xFF;
         };
 
+        uint8_t *p = dst;
         if (isQuadList)
         {
             for (int i = 0; i + 3 < call.count; i += 4)
             {
-                emitCompVertex(i + 0);
-                emitCompVertex(i + 1);
-                emitCompVertex(i + 2);
-                emitCompVertex(i + 0);
-                emitCompVertex(i + 2);
-                emitCompVertex(i + 3);
+                float x[4], y[4], z[4], u[4], vv[4]; uint32_t c[4];
+                for (int j = 0; j < 4; j++) decodeVert(i+j, x[j], y[j], z[j], u[j], vv[j], c[j]);
+                int idx[] = {0,1,2, 0,2,3};
+                for (int j = 0; j < 6; j++) {
+                    int k = idx[j];
+                    writeStdVert(p, x[k], y[k], z[k], u[k], vv[k], c[k]);
+                    p += 32;
+                }
             }
         }
         else
         {
-            for (int i = 0; i < call.count; ++i)
-                emitCompVertex(i);
+            for (int i = 0; i < call.count; i++) {
+                float x, y, z, u, vv; uint32_t c;
+                decodeVert(i, x, y, z, u, vv, c);
+                writeStdVert(p, x, y, z, u, vv, c);
+                p += 32;
+            }
         }
     }
     else
     {
-        const uint32_t *v = reinterpret_cast<const uint32_t *>(call.bytes.data());
-        auto emitStdVertex = [&](int i)
-        {
-            const uint32_t *s = v + (i * 8);
-            const float x = *reinterpret_cast<const float *>(&s[0]);
-            const float y = *reinterpret_cast<const float *>(&s[1]);
-            const float z = *reinterpret_cast<const float *>(&s[2]);
-            float u = *reinterpret_cast<const float *>(&s[3]);
-            float t = *reinterpret_cast<const float *>(&s[4]);
-            const uint32_t c = s[5];
-            // Tesselator packs color as 0xRRGGBBAA.
-            mcglColor4ub((c >> 24) & 0xFF,
-                         (c >> 16) & 0xFF,
-                         (c >> 8) & 0xFF,
-                         c & 0xFF);
-            mcglTexCoord2f(u, t);
-            mcglVertex3f(x, y, z);
-        };
-
+        // Standard format: already 32 bytes per vertex, just handle quad expansion
+        const uint8_t *src = call.bytes.data();
         if (isQuadList)
         {
+            uint8_t *p = dst;
             for (int i = 0; i + 3 < call.count; i += 4)
             {
-                emitStdVertex(i + 0);
-                emitStdVertex(i + 1);
-                emitStdVertex(i + 2);
-                emitStdVertex(i + 0);
-                emitStdVertex(i + 2);
-                emitStdVertex(i + 3);
+                int idx[] = {0,1,2, 0,2,3};
+                for (int j = 0; j < 6; j++) {
+                    memcpy(p, src + (i + idx[j]) * 32, 32);
+                    p += 32;
+                }
             }
         }
         else
         {
-            for (int i = 0; i < call.count; ++i)
-                emitStdVertex(i);
+            memcpy(dst, src, (size_t)call.count * 32);
         }
     }
-    mcglEnd();
 
-    mcglMatrixMode(0x1702); // GL_TEXTURE
-    mcglPopMatrix();
-    mcglMatrixMode(0x1700); // GL_MODELVIEW
-
-    if (call.hasMatrices)
+    // If no per-vertex color, bake white (0xFFFFFFFF) into color slot
+    if (!call.useVertexColor)
     {
-        mcglPopMatrix();            // modelview
-        mcglMatrixMode(0x1700);     // GL_MODELVIEW
+        uint32_t white = 0xFFFFFFFF;
+        for (int i = 0; i < outCount; i++)
+            memcpy(dst + i * 32 + 20, &white, 4);
     }
+
+    // Apply lightmap brightness from _tex2 field (byte offset 28) for standard format.
+    // _tex2 = skyLight << 20 | blockLight << 4.  Value 0xfe00fe00 means "no lightmap".
+    if (!isCompressed && call.useVertexColor)
+    {
+        for (int i = 0; i < outCount; i++)
+        {
+            uint32_t tex2;
+            memcpy(&tex2, dst + i * 32 + 28, 4);
+            if (tex2 == 0xfe00fe00u) continue; // no lightmap data
+
+            int skyLight   = (tex2 >> 20) & 0xF;
+            int blockLight = (tex2 >> 4) & 0xF;
+            float skyBr   = s_brightnessRamp[skyLight];
+            float blockBr = s_brightnessRamp[blockLight] * 1.5f;
+            float bright  = skyBr + blockBr;
+            if (bright > 1.0f) bright = 1.0f;
+            bright = bright * 0.96f + 0.03f;
+
+            uint32_t col;
+            memcpy(&col, dst + i * 32 + 20, 4);
+            unsigned char r = (col >> 24) & 0xFF;
+            unsigned char g = (col >> 16) & 0xFF;
+            unsigned char b = (col >> 8)  & 0xFF;
+            unsigned char a = col & 0xFF;
+            r = (unsigned char)(r * bright);
+            g = (unsigned char)(g * bright);
+            b = (unsigned char)(b * bright);
+            col = ((uint32_t)r << 24) | ((uint32_t)g << 16) | ((uint32_t)b << 8) | a;
+            memcpy(dst + i * 32 + 20, &col, 4);
+        }
+    }
+
+    // ── Bind pipeline ──
+    VkPipelineKey key = vkp_default_key();
+    key.blendEnable      = g_renderState.blendEnable ? 1 : 0;
+    key.srcBlend         = g_renderState.blendSrc & 0xF;
+    key.dstBlend         = g_renderState.blendDst & 0xF;
+    key.colorWriteMask   = g_renderState.colorWriteMask & 0xF;
+    key.depthTestEnable  = g_renderState.depthTestEnable ? 1 : 0;
+    key.depthWriteEnable = g_renderState.depthWriteEnable ? 1 : 0;
+    if (call.primitive == C4JRender::PRIMITIVE_TYPE_LINE_LIST)
+        key.topology = 1;
+    else if (call.primitive == C4JRender::PRIMITIVE_TYPE_LINE_STRIP)
+        key.topology = 2;
+    else if (call.primitive == C4JRender::PRIMITIVE_TYPE_TRIANGLE_STRIP)
+        key.topology = 3;
+    else if (call.primitive == C4JRender::PRIMITIVE_TYPE_TRIANGLE_FAN)
+        key.topology = 4;
+
+    VkPipeline pipeline = vkp_get_pipeline(key);
+    if (!pipeline) return;
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+    vkCmdPushConstants(cmd, g_pipe.pipelineLayout,
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        0, sizeof(VkPushConstants), &pc);
+
+    // Bind texture descriptor
+    VkDescriptorSet texDesc = (effectiveTextureId > 0)
+        ? vkt_get_descriptor(effectiveTextureId)
+        : g_pipe.whiteTexDescSet;
+    if (effectiveTextureId > 0) g_texturedDraws++;
+    else g_untexturedDraws++;
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+        g_pipe.pipelineLayout, 0, 1, &texDesc, 0, nullptr);
+
+    // ── Bind vertex buffer and draw ──
+    VkBuffer vb = g_vk.stagingBuffer[g_vk.currentFrame];
+    VkDeviceSize offset = alignedOffset;
+    vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &offset);
+    vkCmdDraw(cmd, (uint32_t)outCount, 1, 0, 0);
+
+    g_vk.stagingOffset = alignedOffset + outBytes;
+    g_drawCallCount++;
+
+    // Frustum check: test first vertex of each draw
+    {
+        float *v0 = (float*)dst;
+        float tw = mvp[3]*v0[0] + mvp[7]*v0[1] + mvp[11]*v0[2] + mvp[15];
+        if (tw > 0.001f) {
+            float tx = mvp[0]*v0[0] + mvp[4]*v0[1] + mvp[8]*v0[2]  + mvp[12];
+            float ty = mvp[1]*v0[0] + mvp[5]*v0[1] + mvp[9]*v0[2]  + mvp[13];
+            float tz = mvp[2]*v0[0] + mvp[6]*v0[1] + mvp[10]*v0[2] + mvp[14];
+            float nx = tx/tw, ny = ty/tw, nz = tz/tw;
+            if (nx >= -1 && nx <= 1 && ny >= -1 && ny <= 1 && nz >= 0 && nz <= 1)
+                g_drawsInFrustum++;
+            else
+                g_drawsOutFrustum++;
+        } else {
+            g_drawsOutFrustum++;
+        }
+    }
+
 }
 
 } // namespace
@@ -528,28 +742,86 @@ void C4JRender::Initialise(void * /*pDevice*/, void * /*pSwapChain*/) { ensureGL
 void C4JRender::InitialiseContext() { ensureGLReady(); }
 void C4JRender::Tick()
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread)
+    if (!ensureGLReady())
         return;
     glfwPollEvents();
+    if (glfwWindowShouldClose(g_window))
+    {
+        app.m_bShutdown = true;
+        return;
+    }
     updateWindowSize();
 }
 void C4JRender::UpdateGamma(unsigned short /*usGamma*/) {}
 void C4JRender::StartFrame()
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    // Force sane baseline state each frame; bad legacy state leaks can black out all draws.
-    mcglColorMask(1, 1, 1, 1);
-    mcglDisable(0x0C11); // GL_SCISSOR_TEST
+    if (!ensureGLReady()) return;
+    // Adopt whichever thread actually calls StartFrame as the render thread.
+    // (The GLFW/Vulkan init may happen on a different thread than rendering.)
+    g_renderThread = std::this_thread::get_id();
+    g_drawCallCount = 0;
+    g_cbuffCallCount = 0;
+    g_subUploadCount = 0;
+    g_fullUploadCount = 0;
+    g_timeDraw = 0;
+
+    // Flush any pending texture sub-uploads (from animated textures last frame)
+    // BEFORE beginning the render pass, so the GPU does all transfers in one batch.
+    double t0 = glfwGetTime();
+    vkt_flush_uploads();
+    g_timeFlush = (glfwGetTime() - t0) * 1000.0;
+
+    double t1 = glfwGetTime();
+    if (!vkb_begin_frame())
+    {
+        // Swapchain out of date or minimized — skip this frame
+        g_vk.inRenderPass = false;
+    }
+    g_timeBeginFrame = (glfwGetTime() - t1) * 1000.0;
+    g_startFrameEndTime = glfwGetTime();
 }
 void C4JRender::Present()
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread)
+    if (!ensureGLReady())
         return;
-    glfwSwapBuffers(g_window);
+    g_timeDraw = (glfwGetTime() - g_startFrameEndTime) * 1000.0;
+    g_frameCount++;
+    g_diagFrameAccum++;
+
+    // Log diagnostics every 2 seconds by wall clock (not frame count).
+    // This ensures we see output even at very low FPS.
+    double now = glfwGetTime();
+    if (g_diagLastTime == 0.0) g_diagLastTime = now;
+    if (now - g_diagLastTime >= 2.0)
+    {
+        double elapsed = now - g_diagLastTime;
+        int fps = (elapsed > 0.0) ? (int)(g_diagFrameAccum / elapsed + 0.5) : 0;
+        SessionLog_Printf("[vk-diag] frame %d: %d draws (%d in/%d out) cbuf=%d tex=%d/%d texUp=%d fullUp=%d FPS=%d  flush=%.1fms begin=%.1fms draw=%.1fms end=%.1fms\n",
+            g_frameCount, g_drawCallCount, g_drawsInFrustum, g_drawsOutFrustum,
+            g_cbuffCallCount,
+            g_texturedDraws, g_untexturedDraws,
+            g_subUploadCount, g_fullUploadCount, fps,
+            g_timeFlush, g_timeBeginFrame, g_timeDraw, g_timeEndFrame);
+        g_diagLastTime = now;
+        g_diagFrameAccum = 0;
+    }
+
+    g_drawsInFrustum = 0;
+    g_drawsOutFrustum = 0;
+    g_drawsWithFog = 0;
+    g_compressedDraws = 0;
+    g_standardDraws = 0;
+    g_texturedDraws = 0;
+    g_untexturedDraws = 0;
+    if (g_vk.inRenderPass) {
+        double t2 = glfwGetTime();
+        vkb_end_frame();
+        g_timeEndFrame = (glfwGetTime() - t2) * 1000.0;
+    }
 }
 void C4JRender::Clear(int flags, D3D11_RECT *pRect)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread)
+    if (!ensureGLReady())
         return;
 
     unsigned int mask = 0;
@@ -575,8 +847,10 @@ void C4JRender::SetClearColour(const float colourRGBA[4])
     g_clearRGBA[1] = colourRGBA[1];
     g_clearRGBA[2] = colourRGBA[2];
     g_clearRGBA[3] = colourRGBA[3];
-    if (ensureGLReady() && std::this_thread::get_id() == g_renderThread)
-        mcglClearColor(g_clearRGBA[0], g_clearRGBA[1], g_clearRGBA[2], g_clearRGBA[3]);
+    g_vk.clearColor[0] = colourRGBA[0];
+    g_vk.clearColor[1] = colourRGBA[1];
+    g_vk.clearColor[2] = colourRGBA[2];
+    g_vk.clearColor[3] = colourRGBA[3];
 }
 void C4JRender::DoScreenGrabOnNextPresent() {}
 bool C4JRender::IsWidescreen() { return g_iAspectRatio >= 1.5f; }
@@ -627,7 +901,7 @@ void C4JRender::MatrixPerspective(float fovy, float aspect, float zNear, float z
     const float left = -right;
     softFrustum(left, right, bottom, top, zNear, zFar);
 
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
+    if (!ensureGLReady()) return;
     mcglMatrixMode(mapMatrixMode(tl_softMatrices.mode));
     mcglFrustum((double)left, (double)right, (double)bottom, (double)top, (double)zNear, (double)zFar);
 }
@@ -662,20 +936,13 @@ void C4JRender::MatrixMult(float *mat)
 
 const float *C4JRender::MatrixGet(int type)
 {
-    static thread_local float mat[16];
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread)
-    {
-        memset(mat, 0, sizeof(mat));
-        mat[0] = mat[5] = mat[10] = mat[15] = 1.0f;
-        return mat;
-    }
-    unsigned int pname = 0x0BA6; // GL_MODELVIEW_MATRIX
+    // Return our software matrices directly — mcglGetFloatv is a no-op in Vulkan.
+    ensureSoftMatrices();
     if (type == GL_PROJECTION || type == GL_PROJECTION_MATRIX)
-        pname = 0x0BA7; // GL_PROJECTION_MATRIX
-    else if (type == GL_TEXTURE)
-        pname = 0x0BA8; // GL_TEXTURE_MATRIX
-    mcglGetFloatv(pname, mat);
-    return mat;
+        return tl_softMatrices.proj;
+    if (type == GL_TEXTURE)
+        return tl_softMatrices.tex;
+    return tl_softMatrices.model;
 }
 
 void C4JRender::Set_matrixDirty() {}
@@ -696,20 +963,29 @@ void C4JRender::DrawVertices(ePrimitiveType PrimitiveType, int count, void *data
     call.bytes.resize(bytes);
     memcpy(call.bytes.data(), dataIn, bytes);
     ensureSoftMatrices();
-    call.hasMatrices = true;
-    memcpy(call.modelview, tl_softMatrices.model, sizeof(call.modelview));
-    memcpy(call.projection, tl_softMatrices.proj, sizeof(call.projection));
     call.textureId = tl_currentTexture;
+    call.useVertexColor = tl_nextDrawHasVertexColor;
+    tl_nextDrawHasVertexColor = true; // reset for next draw
     call.globalUV[0] = g_sharedUVU.load(std::memory_order_relaxed);
     call.globalUV[1] = g_sharedUVV.load(std::memory_order_relaxed);
 
     if (tl_recordingCbuff >= 0)
     {
+        // Recording into a command buffer — capture the matrix for later replay.
+        call.hasMatrices = true;
+        memcpy(call.modelview, tl_softMatrices.model, sizeof(call.modelview));
+        memcpy(call.projection, tl_softMatrices.proj, sizeof(call.projection));
         tl_recordingCalls.push_back(std::move(call));
         return;
     }
 
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread)
+    // Immediate draw
+    call.hasMatrices = false;
+    // If GL_TEXTURE_2D is disabled, force texture off (0 = explicitly disabled).
+    if (!g_textureEnabled)
+        call.textureId = 0;
+
+    if (!ensureGLReady())
         return;
     executeDraw(call);
 }
@@ -741,11 +1017,20 @@ void C4JRender::CBuffStart(int index, bool /*full*/)
 {
     tl_recordingCbuff = index;
     tl_recordingCalls.clear();
-    if (tl_currentTexture <= 0)
-    {
-        if (g_currentTexture > 0) tl_currentTexture = g_currentTexture;
-        else tl_currentTexture = g_sharedTextureId.load(std::memory_order_relaxed);
-    }
+    // Save the current modelview and reset to identity.  In real OpenGL,
+    // glNewList(GL_COMPILE) defers operations — they don't touch the current
+    // matrix.  We emulate this by starting recording from identity so that
+    // the captured MV reflects ONLY transforms within the display list
+    // (e.g. chunk-to-world translation), not ambient thread state.
+    ensureSoftMatrices();
+    memcpy(tl_savedModelForRecording, tl_softMatrices.model, sizeof(tl_savedModelForRecording));
+    matIdentity(tl_softMatrices.model);
+    // Don't inherit texture from render thread — display list draws should
+    // use whatever texture is current at replay time (set by the caller before
+    // CBuffCall), matching OpenGL display list semantics where texture binds
+    // are NOT recorded.  The old code captured g_currentTexture here, which
+    // raced with the render thread and could lock in the wrong texture
+    // (e.g. GUI icons) for all subsequent chunk compilations.
 }
 void C4JRender::CBuffClear(int index) { std::lock_guard<std::mutex> lock(g_cbuffMutex); g_cbuffs[index].clear(); }
 int  C4JRender::CBuffSize(int index) { std::lock_guard<std::mutex> lock(g_cbuffMutex); return (int)g_cbuffs[index].size(); }
@@ -756,10 +1041,12 @@ void C4JRender::CBuffEnd()
     g_cbuffs[tl_recordingCbuff] = std::move(tl_recordingCalls);
     tl_recordingCalls.clear();
     tl_recordingCbuff = -1;
+    // Restore modelview saved at CBuffStart (undo the identity reset)
+    memcpy(tl_softMatrices.model, tl_savedModelForRecording, sizeof(tl_softMatrices.model));
 }
 bool C4JRender::CBuffCall(int index, bool /*full*/)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread)
+    if (!ensureGLReady())
         return false;
     std::vector<DrawCall> local;
     {
@@ -768,6 +1055,7 @@ bool C4JRender::CBuffCall(int index, bool /*full*/)
         if (it == g_cbuffs.end()) return false;
         local = it->second;
     }
+    g_cbuffCallCount++;
     int replayTextureId = g_currentTexture;
     if (replayTextureId <= 0)
     {
@@ -779,15 +1067,20 @@ bool C4JRender::CBuffCall(int index, bool /*full*/)
     for (const DrawCall &src : local)
     {
         DrawCall c = src;
-        // Command-buffer playback should preserve bound texture state across draws.
-        // Some recorded draws do not carry an explicit texture id and rely on prior bind.
-        if (c.textureId > 0)
+        if (g_textureEnabled)
         {
-            replayTextureId = c.textureId;
+            // Textured replay: resolve texture from recorded or current state.
+            if (c.textureId > 0)
+                replayTextureId = c.textureId;
+            else if (replayTextureId > 0)
+                c.textureId = replayTextureId;
         }
-        else if (replayTextureId > 0)
+        else
         {
-            c.textureId = replayTextureId;
+            // Untextured replay (sky, lines): force texture off.
+            // Use 0 (not -1) so executeDraw doesn't fall through to the
+            // texture resolution chain that would re-assign a texture.
+            c.textureId = 0;
         }
         executeDraw(c);
     }
@@ -801,84 +1094,51 @@ void C4JRender::CBuffDeferredModeEnd() {}
 
 int C4JRender::TextureCreate()
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return 0;
-    unsigned int glTex = 0;
-    mcglGenTextures(1, &glTex);
-    if (glTex == 0) return 0;
-    int id = g_nextTextureId++;
-    g_textures[id].glId = glTex;
+    if (!ensureGLReady()) return 0;
+    int id = vkt_create();
+    TextureBind(id);
     return id;
 }
 
 void C4JRender::TextureFree(int idx)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    auto it = g_textures.find(idx);
-    if (it == g_textures.end()) return;
-    unsigned int glTex = it->second.glId;
-    mcglDeleteTextures(1, &glTex);
-    g_textures.erase(it);
+    if (!ensureGLReady()) return;
+    vkt_free(idx);
 }
 void C4JRender::TextureBind(int idx)
 {
-    // Track logical bind state even off render thread (CBuff recording happens there).
     tl_currentTexture = (idx > 0) ? idx : -1;
     g_sharedTextureId.store(tl_currentTexture, std::memory_order_relaxed);
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    if (idx <= 0) { g_currentTexture = -1; mcglDisable(0x0DE1); mcglBindTexture(0x0DE1, 0); return; }
-    auto it = g_textures.find(idx);
-    if (it == g_textures.end()) return;
+    if (!ensureGLReady()) return;
+    if (idx <= 0) { g_currentTexture = -1; return; }
     g_currentTexture = idx;
-    mcglEnable(0x0DE1); // GL_TEXTURE_2D
-    mcglBindTexture(0x0DE1, it->second.glId);
+    g_textureEnabled = true;
 }
 void C4JRender::TextureBindVertex(int idx) { TextureBind(idx); }
 void C4JRender::TextureSetTextureLevels(int levels) { g_textureLevels = (levels > 0) ? levels : 1; }
 int  C4JRender::TextureGetTextureLevels() { return g_textureLevels; }
 void C4JRender::TextureData(int width, int height, void *data, int level, eTextureFormat /*format*/)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
+    if (!ensureGLReady()) return;
     if (g_currentTexture <= 0 || !data || width <= 0 || height <= 0) return;
-    // Keep upload in RGBA order for desktop GL fixed-function sampling.
-    mcglTexImage2D(0x0DE1, level, 0x1908, width, height, 0, 0x1908, 0x1401, data); // GL_RGBA/UNSIGNED_BYTE
+    vkt_upload(g_currentTexture, width, height, data, level);
+    g_fullUploadCount++;
 }
 void C4JRender::TextureDataUpdate(int xoffset, int yoffset, int width, int height, void *data, int level)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
+    if (!ensureGLReady()) return;
     if (g_currentTexture <= 0 || !data || width <= 0 || height <= 0) return;
-    mcglTexSubImage2D(0x0DE1, level, xoffset, yoffset, width, height, 0x1908, 0x1401, data); // GL_RGBA
+    vkt_sub_upload(g_currentTexture, xoffset, yoffset, width, height, data, level);
+    g_subUploadCount++;
 }
 void C4JRender::TextureSetParam(int param, int value)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    int pname = 0x2801; // GL_TEXTURE_MIN_FILTER
-    int mapped = 0x2600; // GL_NEAREST
-    if (param == GL_TEXTURE_MIN_FILTER)
+    if (!ensureGLReady()) return;
+    if (g_currentTexture <= 0) return;
+    if (param == GL_TEXTURE_MIN_FILTER || param == GL_TEXTURE_MAG_FILTER)
     {
-        pname = 0x2801;
-        // Keep minification non-mipmapped unless we have complete mip chains for all textures.
-        mapped = (value == GL_LINEAR) ? 0x2601 : 0x2600;
+        vkt_set_filter(g_currentTexture, value == GL_LINEAR);
     }
-    else if (param == GL_TEXTURE_MAG_FILTER)
-    {
-        pname = 0x2800;
-        mapped = (value == GL_LINEAR) ? 0x2601 : 0x2600;
-    }
-    else if (param == GL_TEXTURE_WRAP_S)
-    {
-        pname = 0x2802;
-        mapped = (value == GL_REPEAT) ? 0x2901 : 0x812F;
-    }
-    else if (param == GL_TEXTURE_WRAP_T)
-    {
-        pname = 0x2803;
-        mapped = (value == GL_REPEAT) ? 0x2901 : 0x812F;
-    }
-    else
-    {
-        return;
-    }
-    mcglTexParameteri(0x0DE1, pname, mapped);
 }
 void C4JRender::TextureDynamicUpdateStart() {}
 void C4JRender::TextureDynamicUpdateEnd() {}
@@ -1058,109 +1318,87 @@ void *C4JRender::TextureGetTexture(int idx)
 
 void C4JRender::StateSetColour(float r, float g, float b, float a)
 {
-    if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) mcglColor4f(r, g, b, a);
+    g_renderState.globalColor[0] = r; g_renderState.globalColor[1] = g;
+    g_renderState.globalColor[2] = b; g_renderState.globalColor[3] = a;
 }
 void C4JRender::StateSetDepthMask(bool enable)
 {
-    if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) mcglDepthMask(enable ? 1 : 0);
+    g_renderState.depthWriteEnable = enable;
 }
 void C4JRender::StateSetBlendEnable(bool enable)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    if (enable) mcglEnable(0x0BE2); else mcglDisable(0x0BE2); // GL_BLEND
+    g_renderState.blendEnable = enable;
 }
 void C4JRender::StateSetBlendFunc(int src, int dst)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    auto map = [](int f) -> unsigned int {
+    // Map engine blend constants to VkBlendFactor values
+    auto mapToVk = [](int f) -> int {
         switch (f) {
-        case GL_ZERO: return 0;
-        case GL_ONE: return 1;
-        case GL_SRC_COLOR: return 0x0300;
-        case GL_ONE_MINUS_SRC_COLOR: return 0x0301;
-        case GL_SRC_ALPHA: return 0x0302;
-        case GL_ONE_MINUS_SRC_ALPHA: return 0x0303;
-        case GL_DST_ALPHA: return 0x0304;
-        case GL_DST_COLOR: return 0x0306;
-        case GL_ONE_MINUS_DST_COLOR: return 0x0307;
-        case GL_CONSTANT_ALPHA: return 0x8003;
-        case GL_ONE_MINUS_CONSTANT_ALPHA: return 0x8004;
+        case GL_ZERO:                    return 0;   // VK_BLEND_FACTOR_ZERO
+        case GL_ONE:                     return 1;   // VK_BLEND_FACTOR_ONE
+        case GL_SRC_COLOR:               return 2;   // VK_BLEND_FACTOR_SRC_COLOR
+        case GL_ONE_MINUS_SRC_COLOR:     return 3;   // VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR
+        case GL_DST_COLOR:               return 4;   // VK_BLEND_FACTOR_DST_COLOR
+        case GL_ONE_MINUS_DST_COLOR:     return 5;   // VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR
+        case GL_SRC_ALPHA:               return 6;   // VK_BLEND_FACTOR_SRC_ALPHA
+        case GL_ONE_MINUS_SRC_ALPHA:     return 7;   // VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
+        case GL_DST_ALPHA:               return 8;   // VK_BLEND_FACTOR_DST_ALPHA
+        case GL_CONSTANT_ALPHA:          return 12;  // VK_BLEND_FACTOR_CONSTANT_ALPHA
+        case GL_ONE_MINUS_CONSTANT_ALPHA: return 13; // VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA
         default: return 1;
         }
     };
-    mcglBlendFunc(map(src), map(dst));
+    g_renderState.blendSrc = mapToVk(src);
+    g_renderState.blendDst = mapToVk(dst);
 }
 void C4JRender::StateSetBlendFactor(unsigned int colour)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    mcglBlendColor(((colour >> 16) & 0xFF) / 255.0f, ((colour >> 8) & 0xFF) / 255.0f, (colour & 0xFF) / 255.0f, ((colour >> 24) & 0xFF) / 255.0f);
+    // Blend constants stored for vkCmdSetBlendConstants (not used in most draws)
 }
 void C4JRender::StateSetAlphaFunc(int func, float param)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    unsigned int f = 0x0201; // GL_LESS
-    if (func == GL_EQUAL) f = 0x0202;
-    else if (func == GL_LEQUAL) f = 0x0203;
-    else if (func == GL_GREATER) f = 0x0204;
-    else if (func == GL_GEQUAL) f = 0x0206;
-    else if (func == GL_ALWAYS) f = 0x0207;
-    mcglAlphaFunc(f, param);
+    g_renderState.alphaRef = param;
 }
 void C4JRender::StateSetDepthFunc(int func)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    unsigned int f = 0x0201; // GL_LESS
-    if (func == GL_EQUAL) f = 0x0202;
-    else if (func == GL_LEQUAL) f = 0x0203;
-    else if (func == GL_GREATER) f = 0x0204;
-    else if (func == GL_GEQUAL) f = 0x0206;
-    else if (func == GL_ALWAYS) f = 0x0207;
-    mcglDepthFunc(f);
+    // Depth compare op is baked into pipeline as LEQUAL for all variants
 }
 void C4JRender::StateSetFaceCull(bool enable)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    if (enable) mcglEnable(0x0B44); else mcglDisable(0x0B44); // GL_CULL_FACE
+    // Culling disabled in pipeline (VK_CULL_MODE_NONE) — matches original behavior
 }
-void C4JRender::StateSetFaceCullCW(bool enable)
-{
-    if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) mcglFrontFace(enable ? 0x0900 : 0x0901);
-}
-void C4JRender::StateSetLineWidth(float width)
-{
-    if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) mcglLineWidth(width);
-}
+void C4JRender::StateSetFaceCullCW(bool enable) {}
+void C4JRender::StateSetLineWidth(float width) {}
 void C4JRender::StateSetWriteEnable(bool red, bool green, bool blue, bool alpha)
 {
-    if (ensureGLReady() && std::this_thread::get_id() == g_renderThread)
-        mcglColorMask(red ? 1 : 0, green ? 1 : 0, blue ? 1 : 0, alpha ? 1 : 0);
+    g_renderState.colorWriteMask = (red ? 1 : 0) | (green ? 2 : 0) | (blue ? 4 : 0) | (alpha ? 8 : 0);
 }
 void C4JRender::StateSetDepthTestEnable(bool enable)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    if (enable) mcglEnable(0x0B71); else mcglDisable(0x0B71); // GL_DEPTH_TEST
+    g_renderState.depthTestEnable = enable;
 }
 void C4JRender::StateSetAlphaTestEnable(bool enable)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    if (enable) mcglEnable(0x0BC0); else mcglDisable(0x0BC0); // GL_ALPHA_TEST
+    g_renderState.alphaTestEnable = enable;
 }
 void C4JRender::StateSetDepthSlopeAndBias(float slope, float bias)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    if (slope != 0.0f || bias != 0.0f) { mcglEnable(0x8037); mcglPolygonOffset(slope, bias); } else mcglDisable(0x8037);
+    g_renderState.depthBiasSlope = slope;
+    g_renderState.depthBiasConst = bias;
 }
-void C4JRender::StateSetFogEnable(bool enable) { if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return; if (enable) mcglEnable(0x0B60); else mcglDisable(0x0B60); }
-void C4JRender::StateSetFogMode(int mode) { if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) mcglFogi(0x0B65, (mode == GL_EXP) ? 0x0800 : 0x2601); }
-void C4JRender::StateSetFogNearDistance(float dist) { if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) mcglFogf(0x0B63, dist); }
-void C4JRender::StateSetFogFarDistance(float dist) { if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) mcglFogf(0x0B64, dist); }
-void C4JRender::StateSetFogDensity(float density) { if (ensureGLReady() && std::this_thread::get_id() == g_renderThread) mcglFogf(0x0B62, density); }
-void C4JRender::StateSetFogColour(float red, float green, float blue) { if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return; float c[4] = {red, green, blue, 1.0f}; mcglFogfv(0x0B66, c); }
-void C4JRender::StateSetLightingEnable(bool enable)
-{
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
-    if (enable) mcglEnable(0x0B50); else mcglDisable(0x0B50); // GL_LIGHTING
+void C4JRender::SetNextDrawVertexColor(bool hasColor) { tl_nextDrawHasVertexColor = hasColor; }
+void C4JRender::StateSetTextureEnable(bool enable) { g_textureEnabled = enable; }
+void C4JRender::StateSetFogEnable(bool enable) {
+    g_renderState.fogEnable = enable;
 }
+void C4JRender::StateSetFogMode(int mode) { g_renderState.fogMode = (mode == GL_EXP) ? 1 : 0; }
+void C4JRender::StateSetFogNearDistance(float dist) { g_renderState.fogNear = dist; }
+void C4JRender::StateSetFogFarDistance(float dist) { g_renderState.fogFar = dist; }
+void C4JRender::StateSetFogDensity(float density) { g_renderState.fogDensity = density; }
+void C4JRender::StateSetFogColour(float r, float g, float b) {
+    g_renderState.fogColor[0]=r; g_renderState.fogColor[1]=g; g_renderState.fogColor[2]=b;
+}
+void C4JRender::StateSetLightingEnable(bool enable) {}
 void C4JRender::StateSetVertexTextureUV(float u, float v)
 {
     tl_globalUV[0] = u;
@@ -1168,18 +1406,18 @@ void C4JRender::StateSetVertexTextureUV(float u, float v)
     g_sharedUVU.store(u, std::memory_order_relaxed);
     g_sharedUVV.store(v, std::memory_order_relaxed);
 }
-void C4JRender::StateSetLightColour(int light, float red, float green, float blue) { if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return; float d[4] = {red, green, blue, 1.0f}; mcglLightfv(light == 1 ? 0x4001 : 0x4000, 0x1201, d); }
-void C4JRender::StateSetLightAmbientColour(float red, float green, float blue) { if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return; float a[4] = {red, green, blue, 1.0f}; mcglLightModelfv(0x0B53, a); }
-void C4JRender::StateSetLightDirection(int light, float x, float y, float z) { if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return; float p[4] = {x, y, z, 0.0f}; mcglLightfv(light == 1 ? 0x4001 : 0x4000, 0x1203, p); }
+void C4JRender::StateSetLightColour(int light, float red, float green, float blue) { if (!ensureGLReady()) return; float d[4] = {red, green, blue, 1.0f}; mcglLightfv(light == 1 ? 0x4001 : 0x4000, 0x1201, d); }
+void C4JRender::StateSetLightAmbientColour(float red, float green, float blue) { if (!ensureGLReady()) return; float a[4] = {red, green, blue, 1.0f}; mcglLightModelfv(0x0B53, a); }
+void C4JRender::StateSetLightDirection(int light, float x, float y, float z) { if (!ensureGLReady()) return; float p[4] = {x, y, z, 0.0f}; mcglLightfv(light == 1 ? 0x4001 : 0x4000, 0x1203, p); }
 void C4JRender::StateSetLightEnable(int light, bool enable)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
+    if (!ensureGLReady()) return;
     unsigned int l = (light == 1) ? 0x4001 : 0x4000;
     if (enable) mcglEnable(l); else mcglDisable(l);
 }
 void C4JRender::StateSetViewport(eViewportType viewportType)
 {
-    if (!ensureGLReady() || std::this_thread::get_id() != g_renderThread) return;
+    if (!ensureGLReady()) return;
     int x = 0, y = 0, w = g_iScreenWidth, h = g_iScreenHeight;
     switch (viewportType)
     {
@@ -1217,50 +1455,237 @@ void C4JRender::Resume() {}
 
 /* ********************************************************************
  *
- *  C_4JInput  --  Input Manager stubs
+ *  C_4JInput  --  Keyboard/mouse → virtual gamepad input
  *
  * ********************************************************************/
 
-void C_4JInput::Initialise(int /*iInputStateC*/, unsigned char /*ucMapC*/, unsigned char /*ucActionC*/, unsigned char /*ucMenuActionC*/) {}
-void C_4JInput::Tick() {}
-void C_4JInput::SetDeadzoneAndMovementRange(unsigned int /*uiDeadzone*/, unsigned int /*uiMovementRangeMax*/) {}
+// --- Input state ---
+static uint32_t s_joypadMaps[3][64] = {};   // maps[mapStyle][action] = button bitmask
+static uint8_t  s_padMapStyle[4] = {};       // which map style each pad uses
+static uint32_t s_buttons     = 0;           // current frame virtual button bitmask
+static uint32_t s_buttonsPrev = 0;           // previous frame for edge detection
+static float    s_stickLX = 0, s_stickLY = 0;
+static float    s_stickRX = 0, s_stickRY = 0;
+static uint8_t  s_triggerL = 0, s_triggerR = 0;
+static bool     s_mouseCaptured = false;
+static double   s_lastMouseX = 0, s_lastMouseY = 0;
+static bool     s_firstMouse = true;
+static bool     s_menuDisplayed = false;
+static float    s_mouseSensitivity = 0.06f;
 
-void         C_4JInput::SetGameJoypadMaps(unsigned char /*ucMap*/, unsigned char /*ucAction*/, unsigned int /*uiActionVal*/) {}
-unsigned int C_4JInput::GetGameJoypadMaps(unsigned char /*ucMap*/, unsigned char /*ucAction*/) { return 0; }
+void C_4JInput::Initialise(int, unsigned char, unsigned char, unsigned char)
+{
+    if (g_window)
+        glfwSetScrollCallback(g_window, inputScrollCallback);
+}
 
-void          C_4JInput::SetJoypadMapVal(int /*iPad*/, unsigned char /*ucMap*/) {}
-unsigned char C_4JInput::GetJoypadMapVal(int /*iPad*/) { return 0; }
+void C_4JInput::Tick()
+{
+    if (!g_window) return;
 
-void C_4JInput::SetJoypadSensitivity(int /*iPad*/, float /*fSensitivity*/) {}
+    s_buttonsPrev = s_buttons;
+    s_buttons = 0;
+    s_stickLX = s_stickLY = 0;
+    s_stickRX = s_stickRY = 0;
+    s_triggerL = s_triggerR = 0;
 
-unsigned int C_4JInput::GetValue(int /*iPad*/, unsigned char /*ucAction*/, bool /*bRepeat*/) { return 0; }
+    // --- WASD → left stick + digital stick buttons ---
+    if (glfwGetKey(g_window, GLFW_KEY_W) == GLFW_PRESS) {
+        s_buttons |= _360_JOY_BUTTON_LSTICK_UP;
+        s_stickLY += 1.0f;
+    }
+    if (glfwGetKey(g_window, GLFW_KEY_S) == GLFW_PRESS) {
+        s_buttons |= _360_JOY_BUTTON_LSTICK_DOWN;
+        s_stickLY -= 1.0f;
+    }
+    if (glfwGetKey(g_window, GLFW_KEY_A) == GLFW_PRESS) {
+        s_buttons |= _360_JOY_BUTTON_LSTICK_LEFT;
+        s_stickLX -= 1.0f;
+    }
+    if (glfwGetKey(g_window, GLFW_KEY_D) == GLFW_PRESS) {
+        s_buttons |= _360_JOY_BUTTON_LSTICK_RIGHT;
+        s_stickLX += 1.0f;
+    }
+    // Clamp diagonal movement
+    float stickLen = s_stickLX * s_stickLX + s_stickLY * s_stickLY;
+    if (stickLen > 1.0f) {
+        float inv = 1.0f / sqrtf(stickLen);
+        s_stickLX *= inv;
+        s_stickLY *= inv;
+    }
 
-bool C_4JInput::ButtonPressed(int /*iPad*/, unsigned char /*ucAction*/)  { return false; }
-bool C_4JInput::ButtonReleased(int /*iPad*/, unsigned char /*ucAction*/) { return false; }
-bool C_4JInput::ButtonDown(int /*iPad*/, unsigned char /*ucAction*/)     { return false; }
+    // --- Mouse → right stick (camera look) ---
+    if (s_mouseCaptured) {
+        double mx, my;
+        glfwGetCursorPos(g_window, &mx, &my);
+        if (!s_firstMouse) {
+            float dx = (float)(mx - s_lastMouseX) * s_mouseSensitivity;
+            float dy = (float)(my - s_lastMouseY) * s_mouseSensitivity;
+            // Clamp to -1..1 range
+            s_stickRX = (dx > 1.0f) ? 1.0f : (dx < -1.0f) ? -1.0f : dx;
+            s_stickRY = (dy > 1.0f) ? 1.0f : (dy < -1.0f) ? -1.0f : dy;
+            // Set digital stick buttons for look actions
+            if (s_stickRX > 0.1f)  s_buttons |= _360_JOY_BUTTON_RSTICK_RIGHT;
+            if (s_stickRX < -0.1f) s_buttons |= _360_JOY_BUTTON_RSTICK_LEFT;
+            if (s_stickRY > 0.1f)  s_buttons |= _360_JOY_BUTTON_RSTICK_DOWN;
+            if (s_stickRY < -0.1f) s_buttons |= _360_JOY_BUTTON_RSTICK_UP;
+        }
+        s_lastMouseX = mx;
+        s_lastMouseY = my;
+        s_firstMouse = false;
+    }
 
-void C_4JInput::SetJoypadStickAxisMap(int /*iPad*/, unsigned int /*uiFrom*/, unsigned int /*uiTo*/) {}
-void C_4JInput::SetJoypadStickTriggerMap(int /*iPad*/, unsigned int /*uiFrom*/, unsigned int /*uiTo*/) {}
+    // --- Mouse buttons → triggers ---
+    if (glfwGetMouseButton(g_window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
+        s_buttons |= _360_JOY_BUTTON_RT;
+        s_triggerR = 255;
+    }
+    if (glfwGetMouseButton(g_window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
+        s_buttons |= _360_JOY_BUTTON_LT;
+        s_triggerL = 255;
+    }
+    if (glfwGetMouseButton(g_window, GLFW_MOUSE_BUTTON_MIDDLE) == GLFW_PRESS)
+        s_buttons |= _360_JOY_BUTTON_LTHUMB;
 
-void C_4JInput::SetKeyRepeatRate(float /*fRepeatDelaySecs*/, float /*fRepeatRateSecs*/) {}
-void C_4JInput::SetDebugSequence(const char * /*chSequenceA*/, int(*/*Func*/)(LPVOID), LPVOID /*lpParam*/) {}
+    // --- Face buttons ---
+    if (glfwGetKey(g_window, GLFW_KEY_SPACE) == GLFW_PRESS)
+        s_buttons |= _360_JOY_BUTTON_A;
+    if (glfwGetKey(g_window, GLFW_KEY_Q) == GLFW_PRESS)
+        s_buttons |= _360_JOY_BUTTON_B;
+    if (glfwGetKey(g_window, GLFW_KEY_F) == GLFW_PRESS)
+        s_buttons |= _360_JOY_BUTTON_X;
+    if (glfwGetKey(g_window, GLFW_KEY_E) == GLFW_PRESS)
+        s_buttons |= _360_JOY_BUTTON_Y;
 
-FLOAT C_4JInput::GetIdleSeconds(int /*iPad*/) { return 0.0f; }
+    // --- Menu/system ---
+    if (glfwGetKey(g_window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+        s_buttons |= _360_JOY_BUTTON_START;
+    if (glfwGetKey(g_window, GLFW_KEY_TAB) == GLFW_PRESS)
+        s_buttons |= _360_JOY_BUTTON_BACK;
+    if (glfwGetKey(g_window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
+        s_buttons |= _360_JOY_BUTTON_RTHUMB;
+
+    // --- Scroll wheel → bumpers (hotbar scroll) ---
+    if (s_scrollAccum > 0.5f)  { s_buttons |= _360_JOY_BUTTON_RB; s_scrollAccum = 0; }
+    if (s_scrollAccum < -0.5f) { s_buttons |= _360_JOY_BUTTON_LB; s_scrollAccum = 0; }
+
+    // --- DPad (arrow keys) ---
+    if (glfwGetKey(g_window, GLFW_KEY_UP) == GLFW_PRESS)
+        s_buttons |= _360_JOY_BUTTON_DPAD_UP;
+    if (glfwGetKey(g_window, GLFW_KEY_DOWN) == GLFW_PRESS)
+        s_buttons |= _360_JOY_BUTTON_DPAD_DOWN;
+    if (glfwGetKey(g_window, GLFW_KEY_LEFT) == GLFW_PRESS)
+        s_buttons |= _360_JOY_BUTTON_DPAD_LEFT;
+    if (glfwGetKey(g_window, GLFW_KEY_RIGHT) == GLFW_PRESS)
+        s_buttons |= _360_JOY_BUTTON_DPAD_RIGHT;
+
+    // --- F5 → third person (LTHUMB) ---
+    if (glfwGetKey(g_window, GLFW_KEY_F5) == GLFW_PRESS)
+        s_buttons |= _360_JOY_BUTTON_LTHUMB;
+
+    // --- Mouse capture: left-click grabs, Escape releases ---
+    if (!s_mouseCaptured && !s_menuDisplayed &&
+        glfwGetMouseButton(g_window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS)
+    {
+        glfwSetInputMode(g_window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        if (glfwRawMouseMotionSupported())
+            glfwSetInputMode(g_window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
+        s_mouseCaptured = true;
+        s_firstMouse = true;
+    }
+    if (s_mouseCaptured && glfwGetKey(g_window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+    {
+        glfwSetInputMode(g_window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+        s_mouseCaptured = false;
+    }
+}
+
+void C_4JInput::SetDeadzoneAndMovementRange(unsigned int, unsigned int) {}
+
+void C_4JInput::SetGameJoypadMaps(unsigned char ucMap, unsigned char ucAction, unsigned int uiActionVal)
+{
+    if (ucMap < 3 && ucAction < 64)
+        s_joypadMaps[ucMap][ucAction] = uiActionVal;
+}
+
+unsigned int C_4JInput::GetGameJoypadMaps(unsigned char ucMap, unsigned char ucAction)
+{
+    if (ucMap < 3 && ucAction < 64)
+        return s_joypadMaps[ucMap][ucAction];
+    return 0;
+}
+
+void C_4JInput::SetJoypadMapVal(int iPad, unsigned char ucMap)
+{
+    if (iPad >= 0 && iPad < 4) s_padMapStyle[iPad] = ucMap;
+}
+
+unsigned char C_4JInput::GetJoypadMapVal(int iPad)
+{
+    return (iPad >= 0 && iPad < 4) ? s_padMapStyle[iPad] : 0;
+}
+
+void C_4JInput::SetJoypadSensitivity(int, float) {}
+
+unsigned int C_4JInput::GetValue(int iPad, unsigned char ucAction, bool)
+{
+    if (iPad != 0) return 0;
+    if (ucAction == 255) return s_buttons ? 1 : 0;
+    unsigned int mapping = s_joypadMaps[s_padMapStyle[0]][ucAction < 64 ? ucAction : 0];
+    return (s_buttons & mapping) ? 1 : 0;
+}
+
+bool C_4JInput::ButtonPressed(int iPad, unsigned char ucAction)
+{
+    if (iPad != 0) return false;
+    if (ucAction == 255) {
+        uint32_t newlyPressed = s_buttons & ~s_buttonsPrev;
+        return newlyPressed != 0;
+    }
+    unsigned int mapping = s_joypadMaps[s_padMapStyle[0]][ucAction < 64 ? ucAction : 0];
+    return (s_buttons & mapping) && !(s_buttonsPrev & mapping);
+}
+
+bool C_4JInput::ButtonReleased(int iPad, unsigned char ucAction)
+{
+    if (iPad != 0) return false;
+    if (ucAction == 255) {
+        uint32_t newlyReleased = s_buttonsPrev & ~s_buttons;
+        return newlyReleased != 0;
+    }
+    unsigned int mapping = s_joypadMaps[s_padMapStyle[0]][ucAction < 64 ? ucAction : 0];
+    return !(s_buttons & mapping) && (s_buttonsPrev & mapping);
+}
+
+bool C_4JInput::ButtonDown(int iPad, unsigned char ucAction)
+{
+    if (iPad != 0) return false;
+    if (ucAction == 255) return s_buttons != 0;
+    unsigned int mapping = s_joypadMaps[s_padMapStyle[0]][ucAction < 64 ? ucAction : 0];
+    return (s_buttons & mapping) != 0;
+}
+
+void C_4JInput::SetJoypadStickAxisMap(int, unsigned int, unsigned int) {}
+void C_4JInput::SetJoypadStickTriggerMap(int, unsigned int, unsigned int) {}
+
+void C_4JInput::SetKeyRepeatRate(float, float) {}
+void C_4JInput::SetDebugSequence(const char *, int(*)(LPVOID), LPVOID) {}
+
+FLOAT C_4JInput::GetIdleSeconds(int) { return 0.0f; }
 
 bool C_4JInput::IsPadConnected(int iPad)
 {
-    // Pad 0 is always "connected" so the game has a primary controller
     return (iPad == 0);
 }
 
-float         C_4JInput::GetJoypadStick_LX(int /*iPad*/, bool /*bCheckMenuDisplay*/) { return 0.0f; }
-float         C_4JInput::GetJoypadStick_LY(int /*iPad*/, bool /*bCheckMenuDisplay*/) { return 0.0f; }
-float         C_4JInput::GetJoypadStick_RX(int /*iPad*/, bool /*bCheckMenuDisplay*/) { return 0.0f; }
-float         C_4JInput::GetJoypadStick_RY(int /*iPad*/, bool /*bCheckMenuDisplay*/) { return 0.0f; }
-unsigned char C_4JInput::GetJoypadLTrigger(int /*iPad*/, bool /*bCheckMenuDisplay*/) { return 0; }
-unsigned char C_4JInput::GetJoypadRTrigger(int /*iPad*/, bool /*bCheckMenuDisplay*/) { return 0; }
+float C_4JInput::GetJoypadStick_LX(int iPad, bool) { return (iPad == 0) ? s_stickLX : 0.0f; }
+float C_4JInput::GetJoypadStick_LY(int iPad, bool) { return (iPad == 0) ? s_stickLY : 0.0f; }
+float C_4JInput::GetJoypadStick_RX(int iPad, bool) { return (iPad == 0) ? s_stickRX : 0.0f; }
+float C_4JInput::GetJoypadStick_RY(int iPad, bool) { return (iPad == 0) ? s_stickRY : 0.0f; }
+unsigned char C_4JInput::GetJoypadLTrigger(int iPad, bool) { return (iPad == 0) ? s_triggerL : (uint8_t)0; }
+unsigned char C_4JInput::GetJoypadRTrigger(int iPad, bool) { return (iPad == 0) ? s_triggerR : (uint8_t)0; }
 
-void C_4JInput::SetMenuDisplayed(int /*iPad*/, bool /*bVal*/) {}
+void C_4JInput::SetMenuDisplayed(int, bool bVal) { s_menuDisplayed = bVal; }
 
 EKeyboardResult C_4JInput::RequestKeyboard(LPCWSTR /*Title*/, LPCWSTR /*Text*/, DWORD /*dwPad*/, UINT /*uiMaxChars*/,
                                            int(*/*Func*/)(LPVOID, const bool), LPVOID /*lpParam*/, C_4JInput::EKeyboardMode /*eMode*/)

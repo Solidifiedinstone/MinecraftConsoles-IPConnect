@@ -15,7 +15,7 @@ BufferedOutputStream::BufferedOutputStream(OutputStream *out, int size)
 
 BufferedOutputStream::~BufferedOutputStream()
 {
-	delete buf.data;
+	delete[] buf.data;
 }
 
 //Flushes this buffered output stream. This forces any buffered output bytes to be written out to the underlying output stream.

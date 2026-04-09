@@ -654,13 +654,14 @@ static inline void GetLocalTime(SYSTEMTIME* st)
 }
 
 /* ====================================================================
- *  OutputDebugStringA
+ *  OutputDebugStringA  — redirected to session log file
  * ==================================================================== */
+#include "SessionLog.h"
 #ifndef OutputDebugStringA
-#define OutputDebugStringA(s) fprintf(stderr, "%s", (s))
+#define OutputDebugStringA(s) SessionLog_Write(s)
 #endif
 #ifndef OutputDebugStringW
-#define OutputDebugStringW(s) fwprintf(stderr, L"%ls", (s))
+#define OutputDebugStringW(s) SessionLog_WriteW(s)
 #endif
 #ifndef OutputDebugString
 #define OutputDebugString OutputDebugStringA
@@ -1023,17 +1024,30 @@ static inline BOOL VirtualFree(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType
 #define FILE_CURRENT 1
 #define FILE_END 2
 
-static inline FILE* _lfh_fp(HANDLE h) { return ((_LinuxFileHandle*)h)->fp; }
+static inline FILE* _lfh_fp(HANDLE h) {
+    if (!h || h == INVALID_HANDLE_VALUE) return NULL;
+    return ((_LinuxFileHandle*)h)->fp;
+}
 
 static inline HANDLE CreateFile(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,
     void* lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile) {
     (void)dwShareMode; (void)lpSecurityAttributes; (void)dwFlagsAndAttributes; (void)hTemplateFile;
     const char* mode = "rb";
     if (dwDesiredAccess & GENERIC_WRITE) {
-        if (dwCreationDisposition == OPEN_ALWAYS || dwCreationDisposition == CREATE_ALWAYS) mode = "w+b";
-        else mode = "r+b";
+        if (dwCreationDisposition == CREATE_ALWAYS) {
+            mode = "w+b";
+        } else if (dwCreationDisposition == OPEN_ALWAYS) {
+            // Open existing without truncating; create if missing.
+            mode = "r+b";
+        } else {
+            mode = "r+b";
+        }
     }
     FILE* f = fopen(lpFileName, mode);
+    if (!f && (dwCreationDisposition == OPEN_ALWAYS || dwCreationDisposition == CREATE_ALWAYS)) {
+        // File doesn't exist yet — create it.
+        f = fopen(lpFileName, "w+b");
+    }
     if (!f) return INVALID_HANDLE_VALUE;
     _LinuxFileHandle* h = (_LinuxFileHandle*)malloc(sizeof(_LinuxFileHandle));
     if (!h) { fclose(f); return INVALID_HANDLE_VALUE; }
@@ -1064,6 +1078,7 @@ static inline int _wtoi(const wchar_t* str) {
 static inline BOOL ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead, LPDWORD lpNumberOfBytesRead, void* lpOverlapped) {
     (void)lpOverlapped;
     FILE* f = _lfh_fp(hFile);
+    if (!f) { if (lpNumberOfBytesRead) *lpNumberOfBytesRead = 0; return FALSE; }
     size_t r = fread(lpBuffer, 1, nNumberOfBytesToRead, f);
     if (lpNumberOfBytesRead) *lpNumberOfBytesRead = (DWORD)r;
     return (r > 0 || nNumberOfBytesToRead == 0 || !ferror(f)) ? TRUE : FALSE;
@@ -1072,6 +1087,7 @@ static inline BOOL ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesT
 static inline BOOL WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite, LPDWORD lpNumberOfBytesWritten, void* lpOverlapped) {
     (void)lpOverlapped;
     FILE* f = _lfh_fp(hFile);
+    if (!f) { if (lpNumberOfBytesWritten) *lpNumberOfBytesWritten = 0; return FALSE; }
     size_t w = fwrite(lpBuffer, 1, nNumberOfBytesToWrite, f);
     if (lpNumberOfBytesWritten) *lpNumberOfBytesWritten = (DWORD)w;
     return (w == nNumberOfBytesToWrite) ? TRUE : FALSE;
@@ -1079,16 +1095,18 @@ static inline BOOL WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfByte
 
 static inline DWORD SetFilePointer(HANDLE hFile, LONG lDistanceToMove, PLONG lpDistanceToMoveHigh, DWORD dwMoveMethod) {
     (void)lpDistanceToMoveHigh;
+    FILE* f = _lfh_fp(hFile);
+    if (!f) return (DWORD)-1;
     int origin = SEEK_SET;
     if (dwMoveMethod == FILE_CURRENT) origin = SEEK_CUR;
     else if (dwMoveMethod == FILE_END) origin = SEEK_END;
-    FILE* f = _lfh_fp(hFile);
     fseek(f, lDistanceToMove, origin);
     return (DWORD)ftell(f);
 }
 
 static inline DWORD GetFileSize(HANDLE hFile, LPDWORD lpFileSizeHigh) {
     FILE* f = _lfh_fp(hFile);
+    if (!f) { if (lpFileSizeHigh) *lpFileSizeHigh = 0; return 0; }
     long cur = ftell(f);
     fseek(f, 0, SEEK_END);
     long size = ftell(f);

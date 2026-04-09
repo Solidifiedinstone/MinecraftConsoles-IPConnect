@@ -539,7 +539,7 @@ void LevelChunk::recalcHeightmapOnly()
 		this->setUnsaved(true);
 
 #ifdef __PSVITA__
-		delete blockData.data;
+		delete[] blockData.data;
 #endif
 }
 
@@ -654,7 +654,7 @@ void LevelChunk::recalcHeightmap()
 			this->setUnsaved(true);
 
 #ifdef __PSVITA__
-			delete blockData.data;
+			delete[] blockData.data;
 #endif
 }
 
@@ -2142,7 +2142,7 @@ void LevelChunk::updateBiomeFlags(int x, int z)
 		if( biomes[0]->hasRain()) columnFlags[slot] |= ( eColumnFlag_biomeHasRain << shift );
 		if( biomes[0]->hasSnow()) columnFlags[slot] |= ( eColumnFlag_biomeHasSnow << shift );
 		columnFlags[slot] |= ( eColumnFlag_biomeOk << shift );
-		delete biomes.data;
+		delete[] biomes.data;
 	}
 }
 

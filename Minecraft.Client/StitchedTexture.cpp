@@ -64,12 +64,15 @@ void StitchedTexture::freeFrameTextures()
 
 StitchedTexture::~StitchedTexture()
 {
-	for(auto& frame : *frames)
+	if (frames)
 	{
-		if ( frame )
-			delete frame;
+		for(auto& frame : *frames)
+		{
+			if ( frame )
+				delete frame;
+		}
+		delete frames;
 	}
-	delete frames;
 }
 
 void StitchedTexture::initUVs(float U0, float V0, float U1, float V1)
@@ -192,6 +195,8 @@ int StitchedTexture::getSourceHeight() const
 
 void StitchedTexture::cycleFrames()
 {
+	if (!frames || frames->empty()) return;
+
 	if (frameOverride != NULL)
 	{
 		pair<int, int> current = frameOverride->at(frame);
@@ -204,7 +209,7 @@ void StitchedTexture::cycleFrames()
 
 			current = frameOverride->at(frame);
 			int newFrame = current.first;
-			if (oldFrame != newFrame && newFrame >= 0 && newFrame < frames->size())
+			if (oldFrame != newFrame && newFrame >= 0 && newFrame < (int)frames->size())
 			{
 				source->blit(x, y, frames->at(newFrame), rotated);
 			}
@@ -230,6 +235,7 @@ Texture *StitchedTexture::getSource()
 
 Texture *StitchedTexture::getFrame(int i)
 {
+	if (!frames || frames->empty()) return nullptr;
 	return frames->at(0);
 }
 

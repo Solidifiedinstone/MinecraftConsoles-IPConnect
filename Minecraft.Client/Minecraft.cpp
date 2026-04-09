@@ -1897,6 +1897,7 @@ void Minecraft::run_middle()
 			}
 
 			//int64_t beforeTickTime = System::nanoTime();
+			int64_t _tickLoopStart = System::nanoTime();
 			for (int i = 0; i < timer->ticks; i++)
 			{
 				bool bLastTimerTick = ( i == ( timer->ticks - 1 ) );
@@ -1982,7 +1983,8 @@ void Minecraft::run_middle()
 // 				CompressedTileStorage::tick();	// 4J added
 // 				SparseDataStorage::tick();		// 4J added
 			}
-			//int64_t tickDuraction = System::nanoTime() - beforeTickTime;
+			int64_t _tickLoopEnd = System::nanoTime();
+			double _tickMs = (_tickLoopEnd - _tickLoopStart) / 1e6;
 			MemSect(31);
 			checkGlError(L"Pre render");
 			MemSect(0);
@@ -2007,6 +2009,7 @@ void Minecraft::run_middle()
 			//if (player != NULL && player->isInWall()) options->thirdPersonView = false;
 			if (player != NULL && player->isInWall()) player->SetThirdPersonView(0);
 
+			int64_t _renderStart = System::nanoTime();
 			if (!noRender)
 			{
 				bool bFirst = true;
@@ -2065,6 +2068,16 @@ void Minecraft::run_middle()
 #endif
 			}
 			glFlush();
+			{
+				double _renderMs = (System::nanoTime() - _renderStart) / 1e6;
+				static int64_t _lastLog = 0;
+				int64_t _now = System::nanoTime();
+				if (_now - _lastLog > 2000000000LL) { // every 2 seconds
+					app.DebugPrintf("[perf] ticks=%d tickMs=%.1f renderMs=%.1f\n",
+						timer->ticks, _tickMs, _renderMs);
+					_lastLog = _now;
+				}
+			}
 
 			/*	4J - removed
 			if (!Display::isActive())

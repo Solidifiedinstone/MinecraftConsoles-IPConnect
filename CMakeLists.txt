@@ -58,9 +58,13 @@ if(UNIX AND NOT APPLE)
     "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Linux64/Network/PosixNetLayer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Linux64/4JLibs/4J_Stubs.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Linux64/4JLibs/gl_api.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Linux64/4JLibs/vk_backend.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Linux64/4JLibs/vk_pipeline.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Linux64/4JLibs/vk_texture.cpp"
     # SentientManager stubs already in Extrax64Stubs.cpp
     # DynamicConfigurations stubs already in Extrax64Stubs.cpp
     # SocialManager stubs already in Extrax64Stubs.cpp
+    "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Linux64/SessionLog.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Linux64/Linux64_UIStubs.cpp"
   )
 endif()
@@ -100,7 +104,11 @@ if(UNIX AND NOT APPLE)
     -fpermissive
     -Wno-invalid-offsetof
     -fstack-protector-strong
+    $<$<BOOL:${ENABLE_ASAN}>:-fsanitize=address -fno-omit-frame-pointer>
   )
+  if(ENABLE_ASAN)
+    target_link_options(MinecraftWorld PRIVATE -fsanitize=address)
+  endif()
 else()
   target_compile_definitions(MinecraftWorld PRIVATE
     $<$<CONFIG:Debug>:_LARGE_WORLDS;_DEBUG_MENUS_ENABLED;_DEBUG;_LIB;_CRT_NON_CONFORMING_SWPRINTFS;_CRT_SECURE_NO_WARNINGS;_WINDOWS64>
@@ -152,16 +160,23 @@ if(UNIX AND NOT APPLE)
     -fpermissive
     -Wno-invalid-offsetof
     -fstack-protector-strong
+    $<$<BOOL:${ENABLE_ASAN}>:-fsanitize=address -fno-omit-frame-pointer>
   )
+  if(ENABLE_ASAN)
+    target_link_options(MinecraftClient PRIVATE -fsanitize=address)
+  endif()
   find_package(Threads REQUIRED)
   find_package(PNG REQUIRED)
-  find_package(OpenGL REQUIRED)
+  find_package(Vulkan REQUIRED)
+  target_include_directories(MinecraftClient PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/Minecraft.Client/Linux64/4JLibs/vma"
+  )
   target_link_libraries(MinecraftClient PRIVATE
     MinecraftWorld
     Threads::Threads
     ${CMAKE_DL_LIBS}
     PNG::PNG
-    OpenGL::GL
+    Vulkan::Vulkan
     glfw
   )
 else()

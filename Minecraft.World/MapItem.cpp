@@ -298,7 +298,7 @@ shared_ptr<Packet> MapItem::getUpdatePacket(shared_ptr<ItemInstance> itemInstanc
 	if (data.data == NULL || data.length == 0) return nullptr;
 
 	shared_ptr<Packet> retval = shared_ptr<Packet>(new ComplexItemDataPacket((short) Item::map->id, (short) itemInstance->getAuxValue(), data));
-	delete data.data;
+	delete[] data.data;
 	return retval;
 }
 

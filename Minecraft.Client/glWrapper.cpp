@@ -2,10 +2,15 @@
 #include "../Minecraft.World/FloatBuffer.h"
 #include "../Minecraft.World/IntBuffer.h"
 #include "../Minecraft.World/ByteBuffer.h"
+#ifdef _LINUX64
+#include "Linux64/4JLibs/gl_api.h"
+#endif
 
 void glViewport(int x, int y, int w, int h)
 {
-	// We don't really need anything here because minecraft doesn't current do anything other than the default viewport
+	// Use actual framebuffer size, not game's internal resolution.
+	extern int g_iScreenWidth, g_iScreenHeight;
+	mcglViewport(0, 0, g_iScreenWidth, g_iScreenHeight);
 }
 
 void glTranslatef(float x,float y,float z)
@@ -188,7 +193,7 @@ void glDisable(int state)
 	switch(state)
 	{
 		case GL_TEXTURE_2D:
-			RenderManager.TextureBind(-1);
+			RenderManager.StateSetTextureEnable(false);
 			break;
 		case GL_BLEND:
 			RenderManager.StateSetBlendEnable(false);
@@ -221,6 +226,9 @@ void glEnable(int state)
 {
 	switch(state)
 	{
+		case GL_TEXTURE_2D:
+			RenderManager.StateSetTextureEnable(true);
+			break;
 		case GL_BLEND:
 			RenderManager.StateSetBlendEnable(true);
 			break;

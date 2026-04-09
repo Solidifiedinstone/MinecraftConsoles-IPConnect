@@ -52,7 +52,7 @@ void System::arraycopy(arrayWithLength<int> src, unsigned int srcPos, arrayWithL
 //The current value of the system timer, in nanoseconds.
 int64_t System::nanoTime()
 {
-#if defined _WINDOWS64 || defined _XBOX || defined _WIN32
+#if defined _WINDOWS64 || defined _XBOX || defined _WIN32 || defined _LINUX64
 	static LARGE_INTEGER s_frequency = { 0 };
 	if (s_frequency.QuadPart == 0)
 	{

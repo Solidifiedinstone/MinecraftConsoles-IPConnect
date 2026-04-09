@@ -243,7 +243,7 @@ bool FireworksRecipe::matches(shared_ptr<CraftingContainer> craftSlots, Level *l
 			CompoundTag *compound = resultItem->getTag()->getCompound(FireworksItem::TAG_EXPLOSION);
 			if (compound == NULL)
 			{
-				delete colorArray.data;
+				delete[] colorArray.data;
 				
 				setResultItem(resultItem);
 				return false;
@@ -252,7 +252,7 @@ bool FireworksRecipe::matches(shared_ptr<CraftingContainer> craftSlots, Level *l
 		}
 		else
 		{
-			delete colorArray.data;
+			delete[] colorArray.data;
 			
 			setResultItem(resultItem);
 			return false;

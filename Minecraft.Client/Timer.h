@@ -3,7 +3,7 @@
 class Timer
 {
 private:
-	static const int MAX_TICKS_PER_UPDATE = 10;
+	static const int MAX_TICKS_PER_UPDATE = 2;
 
 public:
     float ticksPerSecond;

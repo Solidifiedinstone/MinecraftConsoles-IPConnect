@@ -1,4 +1,7 @@
 #include "stdafx.h"
+#ifdef _LINUX64
+#include "Linux64/4JLibs/gl_api.h"
+#endif
 
 #ifdef _WINDOWS64
 #include "Windows64/KeyboardMouseInput.h"
@@ -170,8 +173,12 @@ void glGetQueryObjectuARB(int,int,IntBuffer *)
 {
 }
 
-void glShadeModel(int)
+void glShadeModel(int mode)
 {
+#ifdef _LINUX64
+	// GL_SMOOTH in the engine is 0, real GL_SMOOTH is 0x1D01, GL_FLAT is 0x1D00
+	mcglShadeModel(mode == 0 ? 0x1D01 : 0x1D00);
+#endif
 }
 
 void glColorMaterial(int,int)

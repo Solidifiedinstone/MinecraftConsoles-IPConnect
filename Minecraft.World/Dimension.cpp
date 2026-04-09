@@ -171,6 +171,7 @@ Vec3 *Dimension::getFogColor(float td, float a) const
 	if (br > 1.0f) br = 1.0f;
 
 	unsigned int baseFogColour = Minecraft::GetInstance()->getColourTable()->getColor( eMinecraftColour_Default_Fog_Colour );
+	if (baseFogColour == 0) baseFogColour = 0x00C0D8FF; // fallback sky-blue fog from colours.col
 	float r = ((baseFogColour >> 16) & 0xff) / 255.0f;
 	float g = ((baseFogColour >> 8) & 0xff) / 255.0f;
 	float b = ((baseFogColour) & 0xff) / 255.0f;

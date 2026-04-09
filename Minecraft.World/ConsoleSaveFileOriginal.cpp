@@ -1041,7 +1041,7 @@ void ConsoleSaveFileOriginal::ConvertRegionFile(File sourceFile)
 				dos->close();
 				dos->deleteChildStream();
 				delete dos;
-				delete inData.data;
+				delete[] inData.data;
 
 			}
 

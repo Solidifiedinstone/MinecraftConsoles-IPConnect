@@ -80,6 +80,7 @@ void CompassTexture::updateFromPosition(Level *level, double x, double z, double
 	// 4J Stu - We share data with another texture
 	if(m_dataTexture != NULL)
 	{
+		if (!m_dataTexture->frames || m_dataTexture->frames->empty()) return;
 		int newFrame = (int) (((rot / (PI * 2)) + 1.0) * m_dataTexture->frames->size()) % m_dataTexture->frames->size();
 		while (newFrame < 0)
 		{
@@ -93,6 +94,7 @@ void CompassTexture::updateFromPosition(Level *level, double x, double z, double
 	}
 	else
 	{
+		if (!frames || frames->empty()) return;
 		int newFrame = (int) (((rot / (PI * 2)) + 1.0) * frames->size()) % frames->size();
 		while (newFrame < 0)
 		{

@@ -451,6 +451,15 @@ int CPlatformNetworkManagerStub::JoinGame(FriendSessionInfo* searchResult, int l
 	if (!WinsockNetLayer::JoinGame(hostIP, hostPort))
 	{
 		app.DebugPrintf("Win64 LAN: Failed to connect to %s:%d\n", hostIP, hostPort);
+
+		// Restore local hosting state that ClientJoinGame() clobbered, so that
+		// a subsequent HostGame (e.g. TemporaryCreateGameStart) finds player 0
+		// as a valid local host instead of a stale remote entry.
+		m_pIQNet->EndGame();
+		IQNet::m_player[0].m_isRemote = false;
+		IQNet::m_player[0].m_isHostPlayer = true;
+		IQNet::s_playerCount = 1;
+
 		return CGameNetworkManager::JOINGAME_FAIL_GENERAL;
 	}
 

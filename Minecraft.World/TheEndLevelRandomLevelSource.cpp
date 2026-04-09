@@ -188,7 +188,7 @@ LevelChunk *TheEndLevelRandomLevelSource::getChunk(int xOffs, int zOffs)
 	levelChunk->recalcHeightmap();
 
 	//delete blocks.data; // Don't delete the blocks as the array data is actually owned by the chunk now
-	delete biomes.data;
+	delete[] biomes.data;
 
 	return levelChunk;
 }

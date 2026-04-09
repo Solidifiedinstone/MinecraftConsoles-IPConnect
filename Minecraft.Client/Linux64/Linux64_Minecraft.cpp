@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <climits>
 
+#include "SessionLog.h"
 #include "GameConfig/Minecraft.spa.h"
 #include "../MinecraftServer.h"
 #include "../LocalPlayer.h"
@@ -82,8 +83,11 @@ void UpdateAspectRatio(int width, int height)
 //--------------------------------------------------------------------------------------
 // Signal handler for graceful shutdown
 //--------------------------------------------------------------------------------------
+static volatile sig_atomic_t g_signalReceived = 0;
+
 static void SignalHandler(int signum)
 {
+	g_signalReceived = signum;
 	app.m_bShutdown = true;
 	MinecraftServer::HaltServer();
 }
@@ -448,6 +452,10 @@ int main(int argc, char* argv[])
 		}
 	}
 
+	// Initialise session log file (creates logs/ directory)
+	SessionLog_Init();
+	atexit(SessionLog_Shutdown);
+
 	// Load username from file
 	LoadUsernameFromFile();
 
@@ -472,7 +480,8 @@ int main(int argc, char* argv[])
 	Minecraft* pMinecraft = InitialiseMinecraftRuntime();
 	if (pMinecraft == NULL)
 	{
-		fprintf(stderr, "Failed to initialise the Minecraft runtime.\n");
+		SessionLog_Printf("Failed to initialise the Minecraft runtime.\n");
+		SessionLog_Shutdown();
 		return 1;
 	}
 
@@ -486,6 +495,9 @@ int main(int argc, char* argv[])
 	// Main game loop
 	while (!app.m_bShutdown)
 	{
+		struct timespec ts_start;
+		clock_gettime(CLOCK_MONOTONIC, &ts_start);
+
 		RenderManager.StartFrame();
 		app.UpdateTime();
 
@@ -527,9 +539,21 @@ int main(int argc, char* argv[])
 
 		ui.CheckMenuDisplayed();
 
-		// Small sleep to avoid spinning the CPU
-		usleep(1000); // 1ms
+		// Frame rate limiter: cap at ~60 FPS to avoid burning CPU/GPU
+		{
+			struct timespec ts_now;
+			clock_gettime(CLOCK_MONOTONIC, &ts_now);
+			double frameMs = (ts_now.tv_sec - ts_start.tv_sec) * 1000.0 + (ts_now.tv_nsec - ts_start.tv_nsec) / 1e6;
+			double targetMs = 16.0; // ~60 FPS
+			if (frameMs < targetMs)
+				usleep((useconds_t)((targetMs - frameMs) * 1000.0));
+		}
 	}
 
+	if (g_signalReceived)
+		SessionLog_Printf("Shutdown triggered by signal %d\n", (int)g_signalReceived);
+	else
+		SessionLog_Printf("Shutdown: game loop exited normally\n");
+	SessionLog_Shutdown();
 	return 0;
 }
